@@ -1,0 +1,40 @@
+name: Bug report
+description: Something broke — an install failure, a crash, or wrong behavior.
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Guppi version
+      description: The release tag you installed (shown by the installer), e.g. v0.1.0.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware / OS
+      placeholder: Raspberry Pi 5 (8GB), Raspberry Pi OS Lite 64-bit (bookworm)
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        For install failures: the installer output. For runtime issues:
+        `journalctl -u guppi-hub -n 100 --no-pager` (also guppi-nats /
+        guppi-postgrest if relevant). Paste as text, not screenshots.
+      render: shell
+  - type: textarea
+    id: instruments
+    attributes:
+      label: Bench setup (if relevant)
+      description: Instruments involved (make/model, USB or Ethernet) and how the rack machine relates to the hub (same box / separate LAN box).

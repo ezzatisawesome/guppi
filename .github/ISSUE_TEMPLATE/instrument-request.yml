@@ -1,0 +1,29 @@
+name: Instrument support request
+description: An instrument you want Guppi to drive.
+labels: [instrument]
+body:
+  - type: input
+    id: instrument
+    attributes:
+      label: Make and model
+      placeholder: Rigol DL3021, Keysight E36313A, …
+    validations:
+      required: true
+  - type: input
+    id: interface
+    attributes:
+      label: Interface
+      placeholder: USB-TMC / Ethernet (VXI-11 or raw SCPI) / Serial / CAN
+    validations:
+      required: true
+  - type: textarea
+    id: idn
+    attributes:
+      label: "*IDN? response (if you have it)"
+      description: Connect however you normally do and send `*IDN?` — paste the reply.
+      render: shell
+  - type: textarea
+    id: notes
+    attributes:
+      label: What you want to do with it
+      description: The measurements or control you need (set voltage, sweep load, capture waveforms, …), and a link to the programming manual if you know it.
