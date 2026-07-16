@@ -12,36 +12,42 @@
 #
 # Installs the full offline bench (docs/single-pi-architecture.md §8.3):
 #   • PostgreSQL (>= 15; distro package, or pgdg when the distro ships older)
+#     — the ONLY thing that runs as a system service
 #   • PostgREST (release binary)        — the browser's read-only layer
 #   • nats-server (release binary)      — the broker
 #   • guppi hub (core agent, uv venv)   — ingest, commands, pairing, UI serving
 #   • prebuilt UI bundle                — no Node runtime, no on-Pi build
-# as systemd services (guppi-nats, guppi-postgrest, guppi-hub), storing data
-# under /var/lib/guppi and serving the dashboard at http://<host>:8000.
-# Zero cloud, zero account, zero login. Pair a bench by running
+#
+# The Guppi servers are NOT daemons: `guppi-hub` runs NATS + PostgREST + the
+# hub in the FOREGROUND, logs in your terminal, Ctrl-C stops everything. Run
+# it in tmux to keep it alive after you close the terminal (the installer
+# prints the exact commands). Consequence: after a reboot, run `guppi-hub`
+# again — nothing auto-starts. Data lives in /var/lib/guppi; the dashboard is
+# at http://<host>:8000 while guppi-hub runs. Zero cloud, zero account, zero
+# login. Pair a bench by running
 #   sudo bash /opt/guppi/src/packages/rack/install.sh
 # on the machine wired to the instruments — on this same box it auto-claims
 # over loopback.
 #
 # Supported: Debian bookworm/bullseye, Ubuntu 20.04+, Raspberry Pi OS 64-bit,
-# on arm64 or amd64, running systemd. 32-bit OS images (armhf/armv7l) are
-# detected and refused with guidance — PostgREST has no 32-bit builds.
+# on arm64 or amd64, running systemd (for PostgreSQL). 32-bit OS images
+# (armhf/armv7l) are detected and refused — PostgREST has no 32-bit builds.
 #
 # Pinning: default is the latest release tag; each release also attaches its
 # own install.sh pre-pinned to that tag (the release workflow substitutes the
 # GUPPI_REF default), so a pinned install is reproducible end-to-end. Release
 # assets are verified against the release's SHA256SUMS when present.
-# Re-running upgrades in place: services quiesce during the swap, the previous
-# tree is kept until the new hub answers, and a failed upgrade rolls back.
+# Re-running upgrades in place (stop guppi-hub first); the previous tree is
+# kept until the new hub passes a start-and-answer check, and a failed
+# upgrade rolls back.
 #
 # Air-gapped / CI installs: set GUPPI_SRC_TARBALL (and optionally
 # GUPPI_UI_TARBALL) to local tarball paths to skip the GitHub downloads.
 #
 # KNOWN v0 LIMITATION (tracked in the doc §11): NATS runs with the anonymous
 # dev config. The browser viewer is read-only by convention, not enforcement,
-# until the installer grows local auth-callout key generation. On a trusted
-# bench LAN this matches the "anyone may view" posture; hostile-LAN write
-# protection lands with the callout wiring.
+# until local auth-callout key generation lands. On a trusted bench LAN this
+# matches the "anyone may view" posture.
 # ============================================================================
 set -Eeuo pipefail
 
@@ -57,7 +63,9 @@ GUPPI_REF="${GUPPI_REF:-}"
 GUPPI_HOME=/opt/guppi
 GUPPI_DATA=/var/lib/guppi
 GUPPI_ETC=/etc/guppi
-RUN_USER=guppi
+LAUNCHER=/usr/local/bin/guppi-hub
+# The operator owns and runs everything (like the rack): whoever invoked sudo.
+RUN_USER="${SUDO_USER:-root}"
 
 # ── Uninstall ────────────────────────────────────────────────────────────────
 # Reverses everything this installer wrote. Data (the database and
@@ -65,14 +73,16 @@ RUN_USER=guppi
 # silently erase months of bench telemetry.
 if [ "${1:-}" = "--uninstall" ] || [ "${GUPPI_UNINSTALL:-0}" = "1" ]; then
   echo "── Uninstalling guppi ──"
+  # Legacy: releases up to v0.1.0-rc.3 ran the servers as systemd services.
   systemctl disable --now guppi-hub guppi-postgrest guppi-nats 2>/dev/null || true
   rm -f /etc/systemd/system/guppi-hub.service \
         /etc/systemd/system/guppi-postgrest.service \
-        /etc/systemd/system/guppi-nats.service
+        /etc/systemd/system/guppi-nats.service \
+        /etc/systemd/journald.conf.d/guppi.conf
   systemctl daemon-reload
+  rm -f "$LAUNCHER"
   rm -rf "$GUPPI_HOME" "$GUPPI_ETC"
   rm -f /usr/local/bin/nats-server /usr/local/bin/postgrest
-  rm -f /etc/systemd/journald.conf.d/guppi.conf
   if [ "${GUPPI_PURGE_DATA:-0}" = "1" ]; then
     sudo -u postgres dropdb --if-exists guppi 2>/dev/null || true
     sudo -u postgres dropuser --if-exists guppi 2>/dev/null || true
@@ -80,10 +90,10 @@ if [ "${1:-}" = "--uninstall" ] || [ "${GUPPI_UNINSTALL:-0}" = "1" ]; then
     sudo -u postgres dropuser --if-exists web_anon 2>/dev/null || true
     PG_HBA=$(sudo -u postgres psql -qAt -c "SHOW hba_file;" 2>/dev/null || true)
     [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ] \
-      && sed -i '/guppi_authenticator/d' "$PG_HBA" \
+      && sed -i '/guppi_authenticator\|local   guppi   guppi/d' "$PG_HBA" \
       && systemctl reload postgresql 2>/dev/null || true
     rm -rf "$GUPPI_DATA"
-    userdel guppi 2>/dev/null || true
+    userdel guppi 2>/dev/null || true   # legacy service user, if present
     echo "✓ Uninstalled (database and data purged)."
   else
     echo "✓ Uninstalled. Kept the database and $GUPPI_DATA — rerun with"
@@ -96,7 +106,7 @@ fi
 command -v apt-get >/dev/null 2>&1 \
   || fail "apt-get not found — Guppi installs on Debian-family systems (Debian, Ubuntu, Raspberry Pi OS)."
 [ -d /run/systemd/system ] \
-  || fail "systemd is not running — containers/WSL without systemd can't host the Guppi services."
+  || fail "systemd is not running — needed to manage PostgreSQL (containers/WSL without systemd won't work)."
 
 ARCH=$(uname -m)
 case "$ARCH" in
@@ -120,7 +130,7 @@ DISK_MB=$(df -Pm /opt 2>/dev/null | awk 'NR==2{print $4}' || echo 99999)
 [ "${DISK_MB:-99999}" -ge 2048 ] || echo "   WARNING: only ${DISK_MB}MB free on /opt — 2GB+ recommended."
 
 # One installer at a time — two concurrent runs interleave apt, chown, and
-# service restarts into a mess.
+# file swaps into a mess.
 exec 9>/var/lock/guppi-install.lock
 flock -n 9 || fail "Another guppi installer is already running."
 
@@ -165,14 +175,23 @@ verify_asset() {
   echo "   $name: checksum OK"
 }
 
+# Whether something is already answering on the hub port. -m bounds the probe:
+# uvicorn binds its socket BEFORE app startup completes, so a hub wedged in
+# startup accepts the connection and never answers — an unbounded curl hangs.
+hub_answers() {
+  local code
+  code=$(curl -m 2 -so /dev/null -w '%{http_code}' http://localhost:8000/ 2>/dev/null || true)
+  [ -n "$code" ] && [ "$code" != "000" ]
+}
+
 # apt on a freshly booted Pi: unattended-upgrades often holds the dpkg lock
 # for the first minutes. Wait for it instead of dying.
 APT="apt-get -o DPkg::Lock::Timeout=180 -qq"
 
-echo "── [1/7] System packages (PostgreSQL >= 15, curl, tar) ──"
+echo "── [1/7] System packages (PostgreSQL >= 15, curl, tar, tmux) ──"
 export DEBIAN_FRONTEND=noninteractive
 $APT update || echo "   WARNING: apt-get update reported errors — continuing with cached package lists"
-$APT install -y curl ca-certificates tar xz-utils postgresql postgresql-client >/dev/null
+$APT install -y curl ca-certificates tar xz-utils tmux postgresql postgresql-client >/dev/null
 
 # Distro PostgreSQL too old (Ubuntu 22.04 ships 14, bullseye 13)? Add the
 # official pgdg repo via the helper postgresql-common ships, install current.
@@ -225,18 +244,9 @@ sudo -u postgres pg_isready -q -p "$PG_PORT" \
 echo "   using PostgreSQL $PG_VER (cluster $PG_CLUSTER, port $PG_PORT)"
 PSQL="sudo -u postgres psql -p $PG_PORT"
 
-# Appliance hygiene: journald grows until it eats the SD card. Cap it.
-if [ ! -f /etc/systemd/journald.conf.d/guppi.conf ]; then
-  mkdir -p /etc/systemd/journald.conf.d
-  printf '# Guppi appliance: keep logs from filling the SD card.\n[Journal]\nSystemMaxUse=200M\n' \
-    > /etc/systemd/journald.conf.d/guppi.conf
-  systemctl try-restart systemd-journald 2>/dev/null || true
-fi
-
-echo "── [2/7] Users & directories ──"
-id -u "$RUN_USER" >/dev/null 2>&1 || useradd --system --create-home --home-dir "$GUPPI_DATA" "$RUN_USER"
+echo "── [2/7] Directories ──"
 mkdir -p "$GUPPI_HOME" "$GUPPI_DATA/artifacts" "$GUPPI_ETC"
-chown -R "$RUN_USER:$RUN_USER" "$GUPPI_DATA"
+chown -R "$RUN_USER:" "$GUPPI_DATA"
 
 echo "── [3/7] Fetch guppi source (${GUPPI_REF:-latest release}) ──"
 # Everything installs from PUBLIC release assets on github.com/$REPO — no
@@ -261,14 +271,27 @@ else
   verify_asset guppi-src.tar.gz
 fi
 
-# Upgrades: quiesce services and keep the old tree (and its venv) as
-# src.prev until the new hub proves healthy — a failed upgrade rolls back.
+# Legacy migration: releases up to v0.1.0-rc.3 ran the servers as systemd
+# services under a 'guppi' system user. Retire the units; the operator's
+# guppi-hub command replaces them.
+if systemctl list-unit-files 2>/dev/null | grep -q '^guppi-hub\.service'; then
+  echo "   migrating: retiring the systemd services (guppi now runs via 'guppi-hub' in your terminal)"
+  systemctl disable --now guppi-hub guppi-postgrest guppi-nats 2>/dev/null || true
+  rm -f /etc/systemd/system/guppi-hub.service \
+        /etc/systemd/system/guppi-postgrest.service \
+        /etc/systemd/system/guppi-nats.service
+  systemctl daemon-reload
+fi
+
+# Upgrades happen with the hub STOPPED — swapping the tree under a running
+# server is a coin flip. Keep the old tree (and its venv) as src.prev until
+# the new hub proves it starts; a failed upgrade rolls back.
+hub_answers && fail "guppi-hub is running — stop it first (Ctrl-C in its tmux session, or: tmux kill-session -t hub) and re-run."
 UPGRADING=0
 if [ -d "$GUPPI_HOME/src" ]; then
   UPGRADING=1
   PREV_REF=$(cat "$GUPPI_ETC/version" 2>/dev/null || echo "unknown")
   echo "   upgrading from $PREV_REF"
-  systemctl stop guppi-hub guppi-postgrest guppi-nats 2>/dev/null || true
   rm -rf "$GUPPI_HOME/src.prev" "$GUPPI_HOME/ui.prev"
   mv "$GUPPI_HOME/src" "$GUPPI_HOME/src.prev"
   if [ -d "$GUPPI_HOME/ui" ]; then mv "$GUPPI_HOME/ui" "$GUPPI_HOME/ui.prev"; fi
@@ -289,7 +312,7 @@ elif [ -z "${GUPPI_SRC_TARBALL:-}" ] \
 else
   echo "   WARNING: no UI bundle — hub runs API-only. Build the bundle on a"
   echo "   dev box with:  make ui-local"
-  echo "   then untar guppi-ui-local.tar.gz into $GUPPI_HOME/ui (chown guppi)"
+  echo "   then untar guppi-ui-local.tar.gz into $GUPPI_HOME/ui"
 fi
 
 echo "── [5/7] nats-server + PostgREST binaries ──"
@@ -325,15 +348,18 @@ sudo -u postgres env PGOPTIONS='-c client_min_messages=warning' \
 $PSQL -qc "ALTER DATABASE guppi SET synchronous_commit = off;"
 $PSQL -qc "GRANT ALL ON SCHEMA public TO guppi; GRANT ALL ON ALL TABLES IN SCHEMA public TO guppi;" guppi
 
-# Local-socket auth, no passwords: the hub connects as system user 'guppi' →
-# db role 'guppi' (peer, already default). PostgREST connects as
-# 'guppi_authenticator' from the same system user, so peer can't match —
-# grant it trust on the local socket for the guppi db only.
+# Local-socket auth, no passwords, and no dedicated system user: the operator
+# runs guppi-hub as themselves, so peer auth can't map them to the 'guppi' db
+# role — trust both guppi roles on the local socket for the guppi db only.
+# Matches the trusted-bench posture (the box's local users are the operators).
 PG_HBA=$($PSQL -qAt -c "SHOW hba_file;")
 if ! grep -q "guppi_authenticator" "$PG_HBA"; then
   sed -i "1i local   guppi   guppi_authenticator   trust" "$PG_HBA"
-  systemctl reload postgresql
 fi
+if ! grep -qE "^local +guppi +guppi +trust" "$PG_HBA"; then
+  sed -i "1i local   guppi   guppi   trust" "$PG_HBA"
+fi
+systemctl reload postgresql
 
 command -v uv >/dev/null 2>&1 \
   || { fetch https://astral.sh/uv/install.sh -o "$TMPD/uv-install.sh" \
@@ -343,20 +369,22 @@ command -v uv >/dev/null 2>&1 \
 # $RUN_USER, so the tree must be theirs before syncing. --frozen: install
 # exactly the shipped uv.lock, no resolution drift. Retry once — PyPI fetches
 # on Pi wifi flake.
-chown -R "$RUN_USER:$RUN_USER" "$GUPPI_HOME"
+chown -R "$RUN_USER:" "$GUPPI_HOME"
 ( cd "$GUPPI_HOME/src/packages/agent" \
   && { sudo -u "$RUN_USER" uv sync --frozen --no-dev -q \
        || { echo "   uv sync failed — retrying once"; sleep 3; sudo -u "$RUN_USER" uv sync --frozen --no-dev -q; }; } )
 
+# Values are QUOTED: guppi-hub sources this file in bash, and the DSN's '&'
+# would otherwise background half the line.
 cat > "$GUPPI_ETC/hub.env" <<EOF
 # Guppi hub — local mode is an explicit opt-in (never inferred).
-# Unix-socket DSN: peer auth (system user guppi → db role guppi), no password.
-GUPPI_BACKEND=local
-DATABASE_URL=postgresql://guppi@/guppi?host=/var/run/postgresql&port=$PG_PORT
-GUPPI_DATA_DIR=$GUPPI_DATA
-GUPPI_UI_DIR=$GUPPI_HOME/ui
+# Unix-socket DSN: hba-trusted local role 'guppi', no password.
+GUPPI_BACKEND="local"
+DATABASE_URL="postgresql://guppi@/guppi?host=/var/run/postgresql&port=$PG_PORT"
+GUPPI_DATA_DIR="$GUPPI_DATA"
+GUPPI_UI_DIR="$GUPPI_HOME/ui"
 EOF
-chown "$RUN_USER:$RUN_USER" "$GUPPI_ETC/hub.env"; chmod 600 "$GUPPI_ETC/hub.env"
+chown "$RUN_USER:" "$GUPPI_ETC/hub.env"; chmod 600 "$GUPPI_ETC/hub.env"
 
 # PostgREST: read-only web_anon over the local socket.
 cat > "$GUPPI_ETC/postgrest.conf" <<EOF
@@ -369,126 +397,103 @@ db-max-rows = 10000
 # Single-user (local mode): PostgREST's default pool of 10 backends wastes Pi RAM.
 db-pool = 3
 EOF
+chown "$RUN_USER:" "$GUPPI_ETC/postgrest.conf"
 
-echo "── [7/7] systemd services ──"
-# Shared unit posture: restart forever (StartLimitIntervalSec=0 — an appliance
-# must never wedge in systemd's start-limit state after a flaky boot), small
-# backoff, and no privilege escalation from the service user.
-cat > /etc/systemd/system/guppi-nats.service <<EOF
-[Unit]
-Description=Guppi NATS broker
-After=network.target
-StartLimitIntervalSec=0
-[Service]
-User=$RUN_USER
-# nats.dev.conf's JetStream store_dir is relative (.nats-data) — anchor it in
-# the data dir, not systemd's default cwd of / (unwritable for $RUN_USER).
-WorkingDirectory=$GUPPI_DATA
-ExecStart=/usr/local/bin/nats-server -c $GUPPI_HOME/src/packages/agent/infrastructure/nats/nats.dev.conf
-Restart=always
-RestartSec=2
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=true
-[Install]
-WantedBy=multi-user.target
+echo "── [7/7] guppi-hub launcher ──"
+# NOT a daemon, by design: one foreground command runs the whole bench —
+# NATS + PostgREST + the hub — with all logs in the terminal. Ctrl-C stops
+# everything. tmux keeps it alive across SSH sessions.
+cat > "$LAUNCHER" <<EOF
+#!/usr/bin/env bash
+# Guppi hub — runs the bench servers (NATS + PostgREST + hub) in the
+# FOREGROUND. Ctrl-C stops everything. Keep it running after you close the
+# terminal with tmux:   tmux new -s hub   →   guppi-hub   →   Ctrl-b, d
+set -euo pipefail
+set -a; . $GUPPI_ETC/hub.env; set +a
+cd "$GUPPI_DATA"   # anchor NATS's relative .nats-data store dir
+/usr/local/bin/nats-server -c "$GUPPI_HOME/src/packages/agent/infrastructure/nats/nats.dev.conf" &
+NATS_PID=\$!
+/usr/local/bin/postgrest "$GUPPI_ETC/postgrest.conf" &
+PGRST_PID=\$!
+cd "$GUPPI_HOME/src/packages/agent"
+"$GUPPI_HOME/src/packages/agent/.venv/bin/uvicorn" app.main:app --host 0.0.0.0 --port 8000 &
+HUB_PID=\$!
+trap 'kill \$HUB_PID \$NATS_PID \$PGRST_PID 2>/dev/null; wait' INT TERM EXIT
+wait \$HUB_PID
 EOF
+chmod 755 "$LAUNCHER"
 
-cat > /etc/systemd/system/guppi-postgrest.service <<EOF
-[Unit]
-Description=Guppi PostgREST (read-only browser layer)
-After=postgresql.service
-Requires=postgresql.service
-StartLimitIntervalSec=0
-[Service]
-User=$RUN_USER
-ExecStart=/usr/local/bin/postgrest $GUPPI_ETC/postgrest.conf
-Restart=always
-RestartSec=2
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=true
-[Install]
-WantedBy=multi-user.target
-EOF
-
-cat > /etc/systemd/system/guppi-hub.service <<EOF
-[Unit]
-Description=Guppi hub (local mode)
-After=guppi-nats.service postgresql.service
-Requires=guppi-nats.service postgresql.service
-StartLimitIntervalSec=0
-[Service]
-User=$RUN_USER
-EnvironmentFile=$GUPPI_ETC/hub.env
-WorkingDirectory=$GUPPI_HOME/src/packages/agent
-ExecStart=$GUPPI_HOME/src/packages/agent/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-Restart=always
-RestartSec=2
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=full
-ProtectHome=true
-[Install]
-WantedBy=multi-user.target
-EOF
-
-systemctl daemon-reload
-systemctl enable guppi-nats guppi-postgrest guppi-hub >/dev/null
-systemctl restart guppi-nats guppi-postgrest guppi-hub
-
-# Don't claim success until the hub actually answers (any HTTP status means
-# the process is up and serving; UI-less installs 404 on / and that's fine).
-hub_up() {
-  local code
-  for _ in $(seq 1 "${1:-30}"); do
-    code=$(curl -so /dev/null -w '%{http_code}' http://localhost:8000/ 2>/dev/null || true)
-    [ -n "$code" ] && [ "$code" != "000" ] && return 0
+# Verify before claiming success: start the hub as the operator, wait for it
+# to answer, stop it. A failed upgrade rolls back to the previous tree.
+smoke_hub() {
+  local log="$1" pid ok=1
+  # shellcheck disable=SC2024  # root owning the smoke log is intended
+  sudo -u "$RUN_USER" "$LAUNCHER" >"$log" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 30); do
+    if hub_answers; then ok=0; break; fi
     sleep 1
   done
-  return 1
+  # Stop it — with escalation. A hub wedged in startup can ignore TERM's
+  # graceful shutdown indefinitely; don't let the installer hang on it.
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  # Belt and braces: reap any guppi processes the launcher left behind
+  # (patterns are guppi-path-specific, nothing else matches them).
+  pkill -f "$GUPPI_HOME/src/packages/agent/.venv/bin/uvicorn" 2>/dev/null || true
+  pkill -f "$GUPPI_HOME/src/packages/agent/infrastructure/nats/nats.dev.conf" 2>/dev/null || true
+  pkill -f "postgrest $GUPPI_ETC/postgrest.conf" 2>/dev/null || true
+  sleep 1
+  return "$ok"
 }
 
-if ! hub_up 30; then
+echo "   verifying: starting the hub once to check it answers…"
+if ! smoke_hub "$TMPD/hub-smoke.log"; then
   echo "" >&2
-  journalctl -u guppi-hub -n 20 --no-pager 2>/dev/null >&2 || true
+  tail -n 25 "$TMPD/hub-smoke.log" >&2 || true
   if [ "$UPGRADING" = 1 ] && [ -d "$GUPPI_HOME/src.prev" ]; then
     # Roll back to the previous tree (with its venv). The schema was already
     # re-applied for the new version — schema changes are additive, so the
     # old hub keeps working against it.
     echo "" >&2
-    echo "✗ Upgraded hub didn't come up — rolling back to $PREV_REF" >&2
-    systemctl stop guppi-hub guppi-postgrest guppi-nats 2>/dev/null || true
+    echo "✗ Upgraded hub didn't start — rolling back to $PREV_REF" >&2
     rm -rf "$GUPPI_HOME/src"; mv "$GUPPI_HOME/src.prev" "$GUPPI_HOME/src"
     if [ -d "$GUPPI_HOME/ui.prev" ]; then
       rm -rf "$GUPPI_HOME/ui"; mv "$GUPPI_HOME/ui.prev" "$GUPPI_HOME/ui"
     fi
-    systemctl restart guppi-nats guppi-postgrest guppi-hub
-    hub_up 30 && echo "✓ Rollback succeeded — $PREV_REF is running." >&2 \
-      || echo "✗ Rollback didn't come up either — check: journalctl -u guppi-hub" >&2
-    fail "Upgrade to $GUPPI_REF failed (rolled back). Journal excerpt above."
+    smoke_hub "$TMPD/hub-rollback.log" \
+      && echo "✓ Rollback verified — $PREV_REF starts. Run: guppi-hub" >&2 \
+      || echo "✗ Rollback didn't start either — log: $GUPPI_ETC (re-run installer)" >&2
+    fail "Upgrade to $GUPPI_REF failed (rolled back). Hub log excerpt above."
   fi
-  fail "Hub didn't answer on :8000 within 30s — journal excerpt above; more: journalctl -u guppi-hub -n 50"
+  fail "Hub didn't answer on :8000 within 30s — log excerpt above."
 fi
 rm -rf "$GUPPI_HOME/src.prev" "$GUPPI_HOME/ui.prev"
 echo "$GUPPI_REF" > "$GUPPI_ETC/version"
-
-# Secondary services: the hub is the gate; these get a warning, not a failure.
-systemctl is-active --quiet guppi-nats \
-  || echo "   WARNING: guppi-nats is not running — check: journalctl -u guppi-nats"
-curl -fsS -o /dev/null http://localhost:3010/ 2>/dev/null \
-  || echo "   WARNING: PostgREST not answering on :3010 — check: journalctl -u guppi-postgrest"
+echo "   hub verified (started, answered on :8000, stopped)"
 
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
 echo ""
 echo "✓ Guppi $GUPPI_REF installed."
-echo "  Dashboard:  http://${IP:-<this-host>}:8000"
+echo ""
+echo "  Start the bench (foreground — logs in your terminal, Ctrl-C stops it):"
+echo ""
+echo "    tmux new -s hub           # open a session"
+echo "    guppi-hub                 # NATS + PostgREST + hub"
+echo "    Ctrl-b, then d            # detach — servers keep running"
+echo ""
+echo "    tmux attach -t hub        # come back to the live logs"
+echo "    tmux ls                   # see what's running"
+echo ""
+echo "  Dashboard:  http://${IP:-<this-host>}:8000   (while guppi-hub runs)"
 echo "  Bench:      sudo bash /opt/guppi/src/packages/rack/install.sh"
 echo "              on the instrument machine, then run: guppi-rack"
 echo "              (this box: it auto-claims over loopback — no code to type)"
-echo "  Upgrade:    re-run this installer"
+echo "  Upgrade:    stop guppi-hub, re-run this installer"
+echo ""
+echo "  NOTE: nothing auto-starts on boot — after a reboot, run guppi-hub again."
 if [ "$UPGRADING" = 1 ] && [ -x /usr/local/bin/guppi-rack ]; then
   echo ""
   echo "  NOTE: the source tree was replaced and the rack venv with it —"
