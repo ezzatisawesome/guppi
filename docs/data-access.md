@@ -7,8 +7,11 @@ data, no export ceremony.
 ## On the Pi
 
 ```
-sudo -u guppi psql guppi
+psql -U guppi -h /var/run/postgresql guppi
 ```
+
+The installer trusts the local `guppi` role on the Unix socket, so no password
+is needed. (There's no `guppi` OS user — the hub runs as whoever installed it.)
 
 The tables you care about:
 
@@ -23,7 +26,7 @@ The tables you care about:
 Example — one signal, last hour, as CSV:
 
 ```
-sudo -u guppi psql guppi -c "\copy (
+psql -U guppi -h /var/run/postgresql guppi -c "\copy (
   SELECT t, value FROM telemetry_points
   WHERE path = 'psu1.1.volt' AND t > now() - interval '1 hour'
   ORDER BY t
