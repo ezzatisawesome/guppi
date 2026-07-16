@@ -50,8 +50,19 @@ prints what it found, and pairs with the hub:
   `guppi-rack` then prints a **claim code** you enter once in the dashboard.
 
 The rig appears in the dashboard within a few seconds of `guppi-rack` starting.
-`guppi-rack` runs in the foreground — keep it in a tmux/screen session, or ask
-for a service unit in an issue if you want one.
+
+`guppi-rack` runs in the foreground on purpose — you see the instrument scan
+and the live output. To keep it running after you close the terminal, use tmux
+(the rack installer sets it up):
+
+```
+tmux new -s rack          # open a session
+guppi-rack                # start the rack inside it
+# Ctrl-b, then d          # detach — the rack keeps running
+
+tmux attach -t rack       # come back to the live output
+tmux ls                   # see what's running
+```
 
 ## 4. Use it
 
