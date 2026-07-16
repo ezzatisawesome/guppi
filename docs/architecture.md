@@ -45,6 +45,15 @@ type:
 | rig | `rig:{rig_id}` + a secret generated at first boot | **write**, scoped to its own subjects (`telemetry.frames.{rig_id}.>`, `execution.{rig_id}.>`, its KV bucket) |
 | browser | static read-only viewer account | **subscribe only** — live frames, test state, KV reads. Cannot publish; cannot write the database |
 
+> **v0 caveat — the NATS half is not enforced yet.** The single-box install
+> ships NATS with the anonymous dev config: the rig/browser subject scoping in
+> the table above is the intended model and how clients connect *by convention*,
+> not something the broker enforces, until local auth-callout key generation
+> lands. What **is** enforced today is the database read-only guarantee — the
+> browser reads through PostgREST as `web_anon`, which holds `SELECT`-only
+> grants and physically cannot write. On a trusted bench LAN (the design
+> assumption) this matches the "anyone may view" posture.
+
 Writes reach Postgres only through the hub's ingest worker. Browsers read via
 PostgREST, whose anonymous role holds plain `SELECT` grants (no row-level
 security — the box is single-tenant, and everyone on the LAN may view).
