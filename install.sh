@@ -19,10 +19,9 @@
 #   • prebuilt UI bundle                — no Node runtime, no on-Pi build
 #
 # The Guppi servers are NOT daemons: `guppi-hub` runs NATS + PostgREST + the
-# hub in the FOREGROUND, logs in your terminal, Ctrl-C stops everything. Run
-# it in tmux to keep it alive after you close the terminal (the installer
-# prints the exact commands). Consequence: after a reboot, run `guppi-hub`
-# again — nothing auto-starts. Data lives in /var/lib/guppi; the dashboard is
+# hub in the FOREGROUND, logs in your terminal, Ctrl-C stops everything.
+# Closing the terminal stops it; after a reboot, run `guppi-hub` again —
+# nothing auto-starts. Data lives in /var/lib/guppi; the dashboard is
 # at http://<host>:8000 while guppi-hub runs. Zero cloud, zero account, zero
 # login. Pair a bench by running
 #   sudo bash /opt/guppi/src/packages/rack/install.sh
@@ -188,10 +187,10 @@ hub_answers() {
 # for the first minutes. Wait for it instead of dying.
 APT="apt-get -o DPkg::Lock::Timeout=180 -qq"
 
-echo "── [1/7] System packages (PostgreSQL >= 15, curl, tar, tmux) ──"
+echo "── [1/7] System packages (PostgreSQL >= 15, curl, tar) ──"
 export DEBIAN_FRONTEND=noninteractive
 $APT update || echo "   WARNING: apt-get update reported errors — continuing with cached package lists"
-$APT install -y curl ca-certificates tar xz-utils tmux postgresql postgresql-client >/dev/null
+$APT install -y curl ca-certificates tar xz-utils postgresql postgresql-client >/dev/null
 
 # Distro PostgreSQL too old (Ubuntu 22.04 ships 14, bullseye 13)? Add the
 # official pgdg repo via the helper postgresql-common ships, install current.
@@ -288,7 +287,7 @@ fi
 # Upgrades happen with the hub STOPPED — swapping the tree under a running
 # server is a coin flip. Keep the old tree (and its venv) as src.prev until
 # the new hub proves it starts; a failed upgrade rolls back.
-hub_answers && fail "guppi-hub is running — stop it first (Ctrl-C in its tmux session, or: tmux kill-session -t hub) and re-run."
+hub_answers && fail "guppi-hub is running — stop it first (Ctrl-C in the terminal running it) and re-run."
 UPGRADING=0
 if [ -d "$GUPPI_HOME/src" ]; then
   UPGRADING=1
@@ -404,12 +403,11 @@ chown "$RUN_USER:" "$GUPPI_ETC/postgrest.conf"
 echo "── [7/7] guppi-hub launcher ──"
 # NOT a daemon, by design: one foreground command runs the whole bench —
 # NATS + PostgREST + the hub — with all logs in the terminal. Ctrl-C stops
-# everything. tmux keeps it alive across SSH sessions.
+# everything. Closing the terminal stops it.
 cat > "$LAUNCHER" <<EOF
 #!/usr/bin/env bash
 # Guppi hub — runs the bench servers (NATS + PostgREST + hub) in the
-# FOREGROUND. Ctrl-C stops everything. Keep it running after you close the
-# terminal with tmux:   tmux new -s hub   →   guppi-hub   →   Ctrl-b, d
+# FOREGROUND. Ctrl-C (or closing the terminal) stops everything.
 set -euo pipefail
 set -a; . $GUPPI_ETC/hub.env; set +a
 cd "$GUPPI_DATA"   # anchor NATS's relative .nats-data store dir
@@ -482,12 +480,7 @@ echo "✓ Guppi $GUPPI_REF installed."
 echo ""
 echo "  Start the bench (foreground — logs in your terminal, Ctrl-C stops it):"
 echo ""
-echo "    tmux new -s hub           # open a session"
 echo "    guppi-hub                 # NATS + PostgREST + hub"
-echo "    Ctrl-b, then d            # detach — servers keep running"
-echo ""
-echo "    tmux attach -t hub        # come back to the live logs"
-echo "    tmux ls                   # see what's running"
 echo ""
 echo "  Dashboard:  http://${IP:-<this-host>}:8000   (while guppi-hub runs)"
 echo "  Bench:      sudo bash /opt/guppi/src/packages/rack/install.sh"
