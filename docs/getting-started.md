@@ -17,12 +17,26 @@ From blank SD card to live telemetry on your bench.
 curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
 ```
 
-One command, ~2–4 minutes on a Pi. It installs PostgreSQL, PostgREST, NATS,
-and the Guppi hub as systemd services (`guppi-hub`, `guppi-nats`,
-`guppi-postgrest`), all starting on boot.
+One command, ~2–4 minutes on a Pi. It installs PostgreSQL (a system service),
+PostgREST, NATS, and the Guppi hub, and gives you one command — `guppi-hub` —
+that runs all the Guppi servers in the foreground with their logs in your
+terminal. Nothing runs as a hidden daemon.
 
-When it finishes, open **`http://<hostname>.local:8000`** from any browser on
-the LAN. No account, no login — the dashboard is just there.
+Start the bench in tmux so it keeps running after you close the terminal:
+
+```
+tmux new -s hub           # open a session
+guppi-hub                 # NATS + PostgREST + hub, logs live in the terminal
+# Ctrl-b, then d          # detach — servers keep running
+
+tmux attach -t hub        # come back to the logs
+tmux ls                   # see what's running
+```
+
+While `guppi-hub` runs, open **`http://<hostname>.local:8000`** from any
+browser on the LAN. No account, no login — the dashboard is just there.
+
+After a reboot, run `guppi-hub` again — nothing auto-starts.
 
 Sanity check:
 
