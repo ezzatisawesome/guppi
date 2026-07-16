@@ -1,4 +1,4 @@
-# Guppi — how the appliance works
+# Guppi — how the single-box install works
 
 This is the technical overview of the Guppi single-box install, shipped with
 the source in `guppi-src.tar.gz`. Some source comments cite internal decision
@@ -13,7 +13,7 @@ dependency and zero accounts. Power it on, browse to it on the LAN, it works
 offline forever.
 
 ```
-┌──────────────────────────── the appliance ───────────────────────────┐
+┌──────────────────────────── the Guppi box ───────────────────────────┐
 │                                                                       │
 │  nats-server            broker: TCP 4222 (rack), WS 9222 (browsers)   │
 │                         JetStream KV holds retained rig state         │
@@ -93,7 +93,7 @@ inbound firewall rules, ever.
 The hub runs in exactly one of two personas, selected explicitly by
 `GUPPI_BACKEND`:
 
-- `local` — this appliance: pinned local owner, no login, PostgREST reads,
+- `local` — this box: pinned local owner, no login, PostgREST reads,
   filesystem artifacts. What the installer configures.
 - `cloud` — the hosted service: real user auth, hosted Postgres, cloud
   storage, and the AI features. None of that code ships in this package.
