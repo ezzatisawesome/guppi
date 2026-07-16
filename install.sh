@@ -50,6 +50,17 @@ case "$ARCH" in
   *) echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
+# Latest release tag for a GitHub repo. Fetch the whole response into a variable
+# first, THEN parse it — piping curl straight into `grep -m1` races: grep exits
+# on the first match and closes the pipe, curl aborts writing with exit 23, and
+# `set -o pipefail` turns that into a script-killing failure (flaky, dependent
+# on connection speed — bites on slower links like a Pi's).
+latest_tag() {
+  local json
+  json=$(curl -fsSL "https://api.github.com/repos/$1/releases/latest") || return 1
+  grep -m1 '"tag_name"' <<<"$json" | cut -d'"' -f4
+}
+
 echo "── [1/7] System packages (PostgreSQL >= 15, curl, tar) ──"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -68,8 +79,7 @@ echo "── [3/7] Fetch guppi source (${GUPPI_REF:-latest release}) ──"
 # account, no token, no clone. guppi-src.tar.gz is the public source subset
 # (hub + rack), built and attached by the release workflow.
 if [ -z "$GUPPI_REF" ]; then
-  GUPPI_REF=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null \
-    | grep -m1 '"tag_name"' | cut -d'"' -f4 || true)
+  GUPPI_REF=$(latest_tag "$REPO" || true)
   [ -n "$GUPPI_REF" ] || { echo "No public release found on $REPO — set GUPPI_REF to a tag"; exit 1; }
 fi
 echo "   ref: $GUPPI_REF"
@@ -93,13 +103,15 @@ fi
 
 echo "── [5/7] nats-server + PostgREST binaries ──"
 if ! command -v nats-server >/dev/null 2>&1; then
-  NATS_VER=$(curl -fsSL "https://api.github.com/repos/nats-io/nats-server/releases/latest" | grep -m1 '"tag_name"' | cut -d'"' -f4)
+  NATS_VER=$(latest_tag nats-io/nats-server)
+  [ -n "$NATS_VER" ] || { echo "Couldn't resolve latest nats-server release"; exit 1; }
   curl -fsSL "https://github.com/nats-io/nats-server/releases/download/$NATS_VER/nats-server-$NATS_VER-linux-$NATS_ARCH.tar.gz" \
     | tar -xz -C /tmp
   install -m755 /tmp/nats-server-*/nats-server /usr/local/bin/nats-server
 fi
 if ! command -v postgrest >/dev/null 2>&1; then
-  PGRST_VER=$(curl -fsSL "https://api.github.com/repos/PostgREST/postgrest/releases/latest" | grep -m1 '"tag_name"' | cut -d'"' -f4)
+  PGRST_VER=$(latest_tag PostgREST/postgrest)
+  [ -n "$PGRST_VER" ] || { echo "Couldn't resolve latest PostgREST release"; exit 1; }
   curl -fsSL "https://github.com/PostgREST/postgrest/releases/download/$PGRST_VER/postgrest-$PGRST_VER-$PGRST_ARCH.tar.xz" \
     | tar -xJ -C /usr/local/bin postgrest
 fi
