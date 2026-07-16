@@ -3,20 +3,23 @@
 ## First moves
 
 ```
-systemctl status guppi-hub guppi-nats guppi-postgrest postgresql
-journalctl -u guppi-hub -n 100 --no-pager
+tmux ls                                  # is a hub session running?
+tmux attach -t hub                       # look at the live server logs
 curl http://localhost:8000/health
+systemctl status postgresql              # the one system service
 ```
 
 `/health` should return `{"status":"ok","mode":"local","postgres":"ok"}`.
-When filing a bug, include the release version and the `journalctl` output.
+When filing a bug, include the release version (`cat /etc/guppi/version`) and
+the last screen of `guppi-hub` output.
 
 ## Install failed partway
 
 The installer is idempotent — fix the cause and re-run it. Common causes:
 
-- **`PostgreSQL >= 15 required`** — you're on an older Debian/Ubuntu. Use
-  bookworm, or add the pgdg apt repo and retry.
+- **`PostgreSQL >= 15 required`** — you're on an older Debian/Ubuntu. The
+  installer adds the pgdg repo automatically; if that failed, add it manually
+  and retry.
 - **No network / GitHub unreachable** — the installer downloads release assets
   from github.com; it needs internet *once*, at install time. The bench runs
   offline afterwards.
@@ -26,12 +29,18 @@ The installer is idempotent — fix the cause and re-run it. Common causes:
 
 ## Dashboard doesn't load
 
-- `http://<host>:8000` — is `guppi-hub` running? (`systemctl status guppi-hub`)
+- Is `guppi-hub` running? (`tmux ls`; if not: `tmux new -s hub`, then
+  `guppi-hub`.) The dashboard only exists while the hub runs — including after
+  a reboot.
 - Page loads but says API-only / plain 404s: the UI bundle wasn't installed —
   re-run the installer (it fetches `guppi-ui-local.tar.gz` from the release).
-- Loads but shows no live data: check `guppi-nats`; the browser connects to
-  port **9222** (WebSocket) on the same host — a firewall between you and the
-  Pi must allow 8000, 9222, and 3010.
+- Loads but shows no live data: check the `guppi-hub` terminal for NATS
+  errors; the browser connects to port **9222** (WebSocket) on the same host —
+  a firewall between you and the Pi must allow 8000, 9222, and 3010.
+- Loads in one browser but not another: some browsers silently upgrade
+  `http://` to `https://` (the hub doesn't serve TLS) — disable
+  "always use secure connections" for this site, and check Shields/VPN/proxy
+  extensions.
 
 ## Rig doesn't appear
 
@@ -49,7 +58,7 @@ The installer is idempotent — fix the cause and re-run it. Common causes:
 
 - History older than the retention window (default 7 days) is deleted by
   design; raise `TELEMETRY_RETENTION_DAYS` in `/etc/guppi/hub.env` (then
-  `sudo systemctl restart guppi-hub`) if your SD card has room.
+  restart `guppi-hub` — Ctrl-C and run it again) if your SD card has room.
 - Check disk space: `df -h /var/lib/guppi`. A full disk stops ingest.
 
 ## Ports in use
@@ -61,9 +70,9 @@ issue — ports aren't configurable in v0.
 ## Starting over
 
 ```
-sudo systemctl stop guppi-hub guppi-nats guppi-postgrest
-sudo rm -rf /opt/guppi /var/lib/guppi /etc/guppi
-sudo -u postgres dropdb guppi
+# stop guppi-hub first (Ctrl-C in its tmux session, or: tmux kill-session -t hub)
+curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh \
+  | sudo GUPPI_PURGE_DATA=1 bash -s -- --uninstall
 ```
 
 then re-run the installer. This deletes all recorded data.
