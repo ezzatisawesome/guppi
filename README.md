@@ -1,8 +1,8 @@
 # Guppi
 
-**Your bench, on your network.** Guppi turns a Raspberry Pi (or any Debian box)
-into a self-contained offline lab bench: live telemetry, instrument control, test
-sequencing, and a web dashboard — no cloud, no account, no login.
+Guppi turns a Raspberry Pi (or any Debian box) into a self-contained lab bench:
+live telemetry, instrument control, test sequencing, and a web dashboard. It runs
+entirely on your network — no cloud, no account, no login.
 
 ## Install the hub
 
@@ -12,18 +12,18 @@ On the Pi:
 curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
 ```
 
-That's the whole install. It sets up PostgreSQL, PostgREST, NATS, and the Guppi
-hub as systemd services, then serves the dashboard at `http://<pi>:8000` for
-any browser on your LAN.
+The installer sets up PostgreSQL, PostgREST, NATS, and the Guppi hub as systemd
+services, then serves the dashboard at `http://<pi>:8000` for any browser on
+your LAN.
 
-- **Pin a version** (installer and assets from the same release — reproducible):
+- **Pin a version** (installer and assets come from the same release):
 
   ```
   curl -fsSL https://github.com/ezzatisawesome/guppi/releases/download/v0.1.0/install.sh | sudo bash
   ```
 
-  Each release carries its own `install.sh`, pre-pinned to that release. The
-  one on `main` always installs the latest.
+  Each release carries its own `install.sh`, pinned to that release. The one on
+  `main` installs the latest.
 - **Upgrade**: re-run the installer.
 
 ## Connect your instruments
@@ -36,8 +36,8 @@ guppi-rack
 ```
 
 `guppi-rack` scans for USB/VISA and Ethernet instruments and pairs with the
-hub — on the same box it auto-claims over loopback with nothing to type; on
-another LAN machine it prints a claim code you enter once in the dashboard.
+hub. On the same box it claims automatically over loopback. On another LAN
+machine it prints a claim code you enter once in the dashboard.
 
 ## Docs
 
@@ -49,11 +49,11 @@ another LAN machine it prints a claim code you enter once in the dashboard.
 ## What this repo is
 
 The public distribution for Guppi: the installer, docs, and versioned
-[releases](https://github.com/ezzatisawesome/guppi/releases) carrying
+[releases](https://github.com/ezzatisawesome/guppi/releases) containing
 `guppi-src.tar.gz` (hub + rack source) and `guppi-ui-local.tar.gz` (the
-prebuilt dashboard). Development happens in a separate repository — see
-[CONTRIBUTING](CONTRIBUTING.md) for what helps (bug reports and instrument
-requests do; pull requests here can't be merged).
+prebuilt dashboard). Development happens in a separate repository. See
+[CONTRIBUTING](CONTRIBUTING.md) for what helps: bug reports and instrument
+requests. Pull requests here can't be merged.
 
 ## Support
 
@@ -65,8 +65,8 @@ requests do; pull requests here can't be merged).
 
 ## License
 
-Guppi is proprietary software — free to install and run on your own bench, with
-release source provided for transparency and security review. See
+Guppi is proprietary software. It is free to install and run on your own bench;
+release source is provided for transparency and security review. See
 [LICENSE](LICENSE).
 
 ## Requirements
