@@ -44,7 +44,7 @@ machine it prints a claim code you enter once in the dashboard.
 - [Getting started](docs/getting-started.md) — blank SD card to live telemetry.
 - [Troubleshooting](docs/troubleshooting.md) — services, logs, the common failures.
 - [Direct data access](docs/data-access.md) — psql, PostgREST, pandas, Grafana; your database is yours.
-- [Architecture](docs/architecture.md) — how the appliance works under the hood.
+- [Architecture](docs/architecture.md) — how the single-box install works under the hood.
 
 ## What this repo is
 
@@ -71,7 +71,9 @@ release source is provided for transparency and security review. See
 
 ## Requirements
 
-- Raspberry Pi 4/5 (or any arm64/amd64 Debian bookworm box), 2 GB+ RAM
-- PostgreSQL ≥ 15 available from the distro (bookworm ships 15)
+- Raspberry Pi 4/5 with the **64-bit** Raspberry Pi OS, or any arm64/amd64
+  Debian bookworm/bullseye or Ubuntu 20.04+ box, 2 GB+ RAM
+- PostgreSQL ≥ 15 (the installer adds the official pgdg repo automatically if
+  your distro ships an older version)
 - A trusted LAN: the dashboard is open to anyone who can reach the Pi
   (read-only viewing by design; there are no accounts)
