@@ -199,11 +199,23 @@ if [ "$PG_MAJOR" -lt 15 ]; then
 fi
 systemctl enable --now postgresql >/dev/null
 
+# Installing the server package normally auto-creates a cluster — but some
+# images (GitHub runners; possibly trimmed distro spins) ship postgresql-common
+# with cluster auto-creation disabled. If no >= 15 cluster exists, create one
+# from the newest installed >= 15 binaries.
+if ! pg_lsclusters --no-header 2>/dev/null | awk '$1+0>=15{f=1} END{exit !f}'; then
+  NEWEST=$(ls /usr/lib/postgresql 2>/dev/null | awk '$1+0>=15' | sort -n | tail -1)
+  [ -n "$NEWEST" ] || { pg_lsclusters 2>&1 || true; fail "No PostgreSQL >= 15 installed — clusters above."; }
+  echo "   no cluster exists — creating $NEWEST/main"
+  pg_createcluster "$NEWEST" main >/dev/null \
+    || { pg_lsclusters 2>&1 || true; fail "pg_createcluster $NEWEST main failed."; }
+fi
+
 # Boxes can carry several clusters (distro 14 + pgdg 17 side by side, each on
 # its own port). Target the newest >= 15 cluster explicitly, by port.
 read -r PG_VER PG_CLUSTER PG_PORT <<<"$(pg_lsclusters --no-header 2>/dev/null \
   | awk '$1+0>=15 {v=$1; c=$2; p=$3} END{print v, c, p}')"
-[ -n "${PG_PORT:-}" ] || fail "No PostgreSQL >= 15 cluster found after install."
+[ -n "${PG_PORT:-}" ] || { pg_lsclusters 2>&1 || true; fail "No PostgreSQL >= 15 cluster found after install (clusters above)."; }
 pg_ctlcluster "$PG_VER" "$PG_CLUSTER" start 2>/dev/null || true
 for _ in $(seq 1 30); do
   sudo -u postgres pg_isready -q -p "$PG_PORT" 2>/dev/null && break; sleep 1
