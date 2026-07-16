@@ -314,7 +314,12 @@ $PSQL -qAt -c "SELECT 1 FROM pg_roles WHERE rolname='guppi'" | grep -q 1 \
   || sudo -u postgres createuser -p "$PG_PORT" guppi
 $PSQL -qAt -c "SELECT 1 FROM pg_database WHERE datname='guppi'" | grep -q 1 \
   || sudo -u postgres createdb -p "$PG_PORT" -O guppi guppi
-$PSQL -q -d guppi \
+# Schema is idempotent (IF NOT EXISTS everywhere) so upgrades re-apply it
+# against the kept database. Suppress the "already exists, skipping" NOTICEs —
+# they're normal on every upgrade and read like something went wrong. env
+# must ride inside the sudo (sudo strips PGOPTIONS otherwise).
+sudo -u postgres env PGOPTIONS='-c client_min_messages=warning' \
+  psql -p "$PG_PORT" -q -d guppi \
   -f "$GUPPI_HOME/src/packages/agent/infrastructure/schema/core.sql" \
   -f "$GUPPI_HOME/src/packages/agent/infrastructure/schema/local.sql"
 $PSQL -qc "ALTER DATABASE guppi SET synchronous_commit = off;"
