@@ -12,9 +12,15 @@ On the Pi:
 curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
 ```
 
-The installer sets up PostgreSQL, PostgREST, NATS, and the Guppi hub as systemd
-services, then serves the dashboard at `http://<pi>:8000` for any browser on
-your LAN.
+The installer sets up PostgreSQL (a system service), PostgREST, NATS, and the
+Guppi hub, then hands you one command:
+
+```
+tmux new -s hub && guppi-hub    # all servers, logs in your terminal; Ctrl-b d to detach
+```
+
+While it runs, the dashboard is at `http://<pi>:8000` for any browser on your
+LAN. The Guppi servers are not daemons — after a reboot, run `guppi-hub` again.
 
 - **Pin a version** (installer and assets come from the same release):
 
@@ -58,7 +64,8 @@ requests. Pull requests here can't be merged.
 ## Support
 
 - **Something broke** → [open a bug report](../../issues/new?template=bug-report.yml)
-  with your release version and `journalctl -u guppi-hub` output.
+  with your release version (`cat /etc/guppi/version`) and the last screen of
+  `guppi-hub` output.
 - **An instrument you want supported** → [instrument request](../../issues/new?template=instrument-request.yml)
   with its `*IDN?` string.
 - **Questions and ideas** → [Discussions](../../discussions).
