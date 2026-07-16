@@ -274,7 +274,9 @@ fi
 # Legacy migration: releases up to v0.1.0-rc.3 ran the servers as systemd
 # services under a 'guppi' system user. Retire the units; the operator's
 # guppi-hub command replaces them.
-if systemctl list-unit-files 2>/dev/null | grep -q '^guppi-hub\.service'; then
+# (file test, not `systemctl list-unit-files | grep -q` — grep -q quitting
+# early SIGPIPEs systemctl and the check silently skips)
+if [ -f /etc/systemd/system/guppi-hub.service ]; then
   echo "   migrating: retiring the systemd services (guppi now runs via 'guppi-hub' in your terminal)"
   systemctl disable --now guppi-hub guppi-postgrest guppi-nats 2>/dev/null || true
   rm -f /etc/systemd/system/guppi-hub.service \
