@@ -49,6 +49,7 @@ machine it prints a claim code you enter once in the dashboard.
 
 - [Getting started](docs/getting-started.md) — blank SD card to live telemetry.
 - [Troubleshooting](docs/troubleshooting.md) — services, logs, the common failures.
+- [Instrument drivers](docs/drivers.md) — how drivers load, and how to write one for your instrument or board.
 - [Direct data access](docs/data-access.md) — psql, PostgREST, pandas, Grafana; your database is yours.
 - [Architecture](docs/architecture.md) — how the single-box install works under the hood.
 
