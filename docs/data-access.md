@@ -17,8 +17,8 @@ The tables you care about:
 
 | Table / view | What's in it |
 | --- | --- |
-| `telemetry` | raw frames within the retention window (`rig_id`, `path`, `t0`, samples) |
-| `telemetry_points` | per-sample view over `telemetry` — one row per (time, value) |
+| `telemetry` | raw frames within the retention window (`t0`, `rig_id`, `device_id`, `path`, `unit`, `dt_us[]`, `sample_values[]`) — one row per frame, samples packed into arrays |
+| `telemetry_points` | per-sample view that unpacks `telemetry` — one row per sample, with `recorded_at` (timestamp) and `value` |
 | `test_executions` | every test run: status, timestamps, full result document (`result_json`) |
 | `artifacts` | captured waveforms: metadata + `storage_path`; bytes live under `/var/lib/guppi/artifacts` |
 | `rigs` | paired rigs |
@@ -27,9 +27,9 @@ Example — one signal, last hour, as CSV:
 
 ```
 psql -U guppi -h /var/run/postgresql guppi -c "\copy (
-  SELECT t, value FROM telemetry_points
-  WHERE path = 'psu1.1.volt' AND t > now() - interval '1 hour'
-  ORDER BY t
+  SELECT recorded_at, value FROM telemetry_points
+  WHERE path = 'psu1.1.volt' AND recorded_at > now() - interval '1 hour'
+  ORDER BY recorded_at
 ) TO '/tmp/volt.csv' CSV HEADER"
 ```
 
@@ -53,7 +53,7 @@ Anything that speaks Postgres or HTTP works. pandas via PostgREST:
 import pandas as pd
 df = pd.read_json(
     "http://bench.local:3010/telemetry_points"
-    "?path=eq.psu1.1.volt&order=t.desc&limit=10000"
+    "?path=eq.psu1.1.volt&order=recorded_at.desc&limit=10000"
 )
 ```
 
