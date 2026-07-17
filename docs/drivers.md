@@ -14,9 +14,10 @@ Four sources, merged in this order (later wins on name collisions):
 3. **`GUPPI_DRIVER_PATH`** — colon-separated `.py` files or directories.
    Good for trying a driver without touching config:
    `GUPPI_DRIVER_PATH=~/my-driver.py guppi-rack`
-4. **`drivers:` in `rig_config.yml`** — the usual place. Each entry is a
-   `.py` file or a driver package directory; relative paths resolve against
-   the config file's directory:
+4. **`drivers:` in `rig_config.yml`** — the usual place. On an installed rack
+   this is **`/etc/guppi-rack/rig_config.yml`** (kept outside the source tree so
+   hub upgrades never touch it). Each entry is a `.py` file or a driver package
+   directory; relative paths resolve against the config file's directory:
 
    ```yaml
    drivers:
