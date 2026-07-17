@@ -3,11 +3,13 @@
 ## First moves
 
 ```
-tmux ls                                  # is a hub session running?
-tmux attach -t hub                       # look at the live server logs
-curl http://localhost:8000/health
+curl http://localhost:8000/health        # is the hub answering?
 systemctl status postgresql              # the one system service
 ```
+
+If the hub isn't answering, look at the terminal you started `guppi-hub` in —
+that's where all the server logs are (Guppi runs in the foreground, not as a
+background service).
 
 `/health` should return `{"status":"ok","mode":"local","postgres":"ok"}`.
 When filing a bug, include the release version (`cat /etc/guppi/version`) and
@@ -29,9 +31,9 @@ The installer is idempotent — fix the cause and re-run it. Common causes:
 
 ## Dashboard doesn't load
 
-- Is `guppi-hub` running? (`tmux ls`; if not: `tmux new -s hub`, then
-  `guppi-hub`.) The dashboard only exists while the hub runs — including after
-  a reboot.
+- Is `guppi-hub` running? The dashboard only exists while the hub runs — in the
+  terminal you started it in. It does not come back on its own after a reboot or
+  after that terminal closes; start it again with `guppi-hub`.
 - Page loads but says API-only / plain 404s: the UI bundle wasn't installed —
   re-run the installer (it fetches `guppi-ui-local.tar.gz` from the release).
 - Loads but shows no live data: check the `guppi-hub` terminal for NATS
@@ -70,7 +72,7 @@ issue — ports aren't configurable in v0.
 ## Starting over
 
 ```
-# stop guppi-hub first (Ctrl-C in its tmux session, or: tmux kill-session -t hub)
+# stop guppi-hub first (Ctrl-C in the terminal running it)
 curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh \
   | sudo GUPPI_PURGE_DATA=1 bash -s -- --uninstall
 ```
