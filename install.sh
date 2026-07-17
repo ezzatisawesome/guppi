@@ -410,6 +410,62 @@ cat > "$LAUNCHER" <<EOF
 # FOREGROUND. Ctrl-C (or closing the terminal) stops everything.
 set -euo pipefail
 set -a; . $GUPPI_ETC/hub.env; set +a
+
+# ── Preflight: reap stale guppi servers before binding their ports ──────
+# guppi-hub isn't a daemon. If the last run was killed hard (terminal
+# closed, SSH dropped, power loss, SIGKILL) the trap below never fired and
+# its children linger holding 8000/9222/4222/3010 — the next launch then
+# can't bind. Reap OUR OWN leftovers (matched by their guppi-specific
+# command lines); refuse to stomp on anything else and say what holds it.
+pids_on_port() {   # PIDs LISTENing on TCP port \$1
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnHp "sport = :\$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u
+  else
+    lsof -tiTCP:"\$1" -sTCP:LISTEN 2>/dev/null | sort -u
+  fi
+}
+proc_cmd() { tr '\0' ' ' < /proc/"\$1"/cmdline 2>/dev/null; }
+is_guppi_proc() {   # true if pid \$1 is one of our servers
+  local cmd; cmd=\$(proc_cmd "\$1") || return 1
+  case "\$cmd" in
+    *"$GUPPI_HOME/src/packages/agent/.venv/bin/uvicorn"*) return 0 ;;
+    *nats/nats.dev.conf*)                                 return 0 ;;
+    *"postgrest $GUPPI_ETC/postgrest.conf"*)              return 0 ;;
+    *) return 1 ;;
+  esac
+}
+preflight_port() {   # name=\$1 port=\$2
+  local pid held=0
+  for pid in \$(pids_on_port "\$2"); do
+    held=1
+    if is_guppi_proc "\$pid"; then
+      echo "   reaping stale \$1 (pid \$pid) holding port \$2 from a previous run"
+      kill "\$pid" 2>/dev/null || true
+    else
+      echo "" >&2
+      echo "  ✗ port \$2 (\$1) is already in use by pid \$pid, which isn't a guppi process:" >&2
+      echo "      \$(proc_cmd "\$pid")" >&2
+      echo "    Stop that process (or free the port), then run guppi-hub again." >&2
+      exit 1
+    fi
+  done
+  [ "\$held" = 1 ] || return 0
+  # Wait for the port to actually free; escalate to SIGKILL on our own PIDs.
+  local i
+  for i in \$(seq 1 10); do
+    [ -z "\$(pids_on_port "\$2")" ] && return 0
+    sleep 0.5
+  done
+  for pid in \$(pids_on_port "\$2"); do
+    is_guppi_proc "\$pid" && kill -9 "\$pid" 2>/dev/null || true
+  done
+  sleep 1
+}
+preflight_port nats-server 4222
+preflight_port nats-server 9222
+preflight_port postgrest  3010
+preflight_port hub        8000
+
 cd "$GUPPI_DATA"   # anchor NATS's relative .nats-data store dir
 /usr/local/bin/nats-server -c "$GUPPI_HOME/src/packages/agent/infrastructure/nats/nats.dev.conf" &
 NATS_PID=\$!
