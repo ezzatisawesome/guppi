@@ -119,6 +119,47 @@ In both shapes, extra keys in the device's config block are matched by name
 to your `__init__` parameters — declare `num_channels`, `bitrate`, or any
 custom knob as a keyword argument and users can set it in YAML.
 
+### Pinning USB serial ports (`port:`) — use `/dev/serial/by-id/`
+
+A driver-owned device on USB (CDC-ACM/USB-serial) enumerates as
+`/dev/ttyACM0`, `/dev/ttyUSB0`, and so on — **but that number is assigned by
+plug/boot order, not by device.** Two USB instruments (say an ITECH supply and
+a Pololu I2C adapter) can swap numbers across a reboot or a replug, so a
+`port: /dev/ttyACM0` in config can silently point at the *wrong* instrument.
+On the bench this showed up as one driver grabbing another's port (field test
+§9): a NACK/timeout storm at best, two sessions corrupting one port at worst.
+
+Pin `port:` to the **stable per-device symlink** under `/dev/serial/by-id/`
+instead. That name is built from the device's vendor and serial number, so it
+always follows the same physical unit:
+
+```
+$ ls -l /dev/serial/by-id/
+usb-ITECH_Electronics_IT-M3904C-80-80_805255051817140031-if00 -> ../../ttyACM0
+usb-Pololu_Corporation_Pololu_...-if00                          -> ../../ttyACM1
+```
+
+The `-> ../../ttyACMx` on the right is just today's number; pin the left-hand
+name:
+
+```yaml
+- id: enables1
+  type: PCA9539
+  port: /dev/serial/by-id/usb-Pololu_Corporation_Pololu_...-if00
+```
+
+Cross-check which is which with `lsusb` (the ITECH is USB vendor `2ec7`); the
+`by-id` name already embeds the maker. If `/dev/serial/by-id/` is missing, the
+device reports no serial string — fall back to `/dev/serial/by-path/` (stable
+per physical USB port; don't move the cable between ports).
+
+The rack guards this: any `/dev/...` port a driver-owned device opens is
+claimed before `connect()`, so two devices resolving to the *same* node fail
+fast with an actionable "already in use" message instead of fighting over it.
+The guard catches a *colliding* pin; `by-id` prevents the collision in the
+first place. Auto-detect (leaving `port:` unset) can still grab a neighbour's
+port — always pin USB serial ports.
+
 ## Self-describing devices (DUTs)
 
 A board that reports its own signal catalog at runtime (e.g. over CAN) is
@@ -134,6 +175,26 @@ Telemetry sampling, test phases, and dashboard commands can hit a driver from
 different threads. The SCPI codec is thread-safe per call; for stateful
 multi-step operations (select a channel, then act on it), wrap the steps in
 `with self.scpi.transaction():` so they can't interleave.
+
+## Distributing a driver as a package
+
+For a driver you maintain and reuse across rigs, publish it as its own
+pip-installable package instead of copying a `.py` file around. `guppi-rack`
+exposes its SDK (`devices`, `catalog`, …), so your package depends on the rack
+and advertises itself through the `guppi.drivers` entry point (source 2 above):
+
+```toml
+# pyproject.toml of your driver package
+[project]
+name = "guppi-driver-acme"
+dependencies = ["guppi-rack"]
+
+[project.entry-points."guppi.drivers"]
+AcmePSU = "guppi_driver_acme:AcmePSU"   # name = the rig_config `type:`
+```
+
+`pip install guppi-driver-acme` into the rack's environment and it's discovered
+automatically — no `drivers:` path or `GUPPI_DRIVER_PATH` needed.
 
 ## Checklist
 
