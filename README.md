@@ -16,11 +16,14 @@ The installer sets up PostgreSQL (a system service), PostgREST, NATS, and the
 Guppi hub, then hands you one command:
 
 ```
-tmux new -s hub && guppi-hub    # all servers, logs in your terminal; Ctrl-b d to detach
+guppi-hub    # runs all servers in the foreground — logs in your terminal, Ctrl-C stops them
 ```
 
 While it runs, the dashboard is at `http://<pi>:8000` for any browser on your
-LAN. The Guppi servers are not daemons — after a reboot, run `guppi-hub` again.
+LAN. The Guppi servers are not daemons — closing the terminal stops them, and
+after a reboot you run `guppi-hub` again. To keep it running after you log out
+of an SSH session, start it inside a terminal multiplexer you install yourself
+(`sudo apt install tmux`, then `tmux new -s hub`) or under `nohup`.
 
 - **Pin a version** (installer and assets come from the same release):
 
