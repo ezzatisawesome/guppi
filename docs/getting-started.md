@@ -22,21 +22,28 @@ PostgREST, NATS, and the Guppi hub, and gives you one command — `guppi-hub` �
 that runs all the Guppi servers in the foreground with their logs in your
 terminal. Nothing runs as a hidden daemon.
 
-Start the bench in tmux so it keeps running after you close the terminal:
+```
+guppi-hub                 # NATS + PostgREST + hub, logs live in the terminal
+# Ctrl-C                  # stops all three
+```
+
+`guppi-hub` holds the terminal on purpose — you watch the live logs, and
+Ctrl-C (or closing the terminal) stops everything. Nothing auto-starts,
+including after a reboot: run `guppi-hub` again.
+
+If you're on the Pi over SSH and want the bench to survive logging out, start
+it inside a terminal multiplexer you install yourself:
 
 ```
+sudo apt install tmux     # once
 tmux new -s hub           # open a session
-guppi-hub                 # NATS + PostgREST + hub, logs live in the terminal
-# Ctrl-b, then d          # detach — servers keep running
-
-tmux attach -t hub        # come back to the logs
-tmux ls                   # see what's running
+guppi-hub                 # start the bench inside it
+# Ctrl-b, then d          # detach — leaves it running
+tmux attach -t hub        # reattach later
 ```
 
 While `guppi-hub` runs, open **`http://<hostname>.local:8000`** from any
 browser on the LAN. No account, no login — the dashboard is just there.
-
-After a reboot, run `guppi-hub` again — nothing auto-starts.
 
 Sanity check:
 
@@ -55,28 +62,35 @@ sudo bash /opt/guppi/src/packages/rack/install.sh
 guppi-rack
 ```
 
-`guppi-rack` scans USB/VISA and the local Ethernet segment for instruments,
-prints what it found, and pairs with the hub:
-
-- **Same box as the hub** — it auto-claims over loopback. Nothing to type.
-- **A different machine on the LAN** — set the hub's address first
-  (`GUPPI_AGENT_URL=http://bench.local:8000 sudo -E bash …/install.sh`);
-  `guppi-rack` then prints a **claim code** you enter once in the dashboard.
-
-The rig appears in the dashboard within a few seconds of `guppi-rack` starting.
-
-`guppi-rack` runs in the foreground on purpose — you see the instrument scan
-and the live output. To keep it running after you close the terminal, use tmux
-(the rack installer sets it up):
+The rack installer asks which hub this rack should pair with:
 
 ```
-tmux new -s rack          # open a session
-guppi-rack                # start the rack inside it
-# Ctrl-b, then d          # detach — the rack keeps running
-
-tmux attach -t rack       # come back to the live output
-tmux ls                   # see what's running
+Which agent should this rack pair with?
+    1) Guppi Cloud   — https://app.guppidev.com   (hosted; default)
+    2) This machine  — http://127.0.0.1:8000       (a hub running on this box)
+    3) Custom URL    — a self-host agent on your LAN (e.g. http://bench.local:8000)
 ```
+
+- **Same box as the hub** — if `guppi-hub` is already running, the installer
+  detects it on loopback and skips the menu; the rack auto-claims, nothing to
+  type. (If the hub isn't up yet, choose **2**.)
+- **A different machine on the LAN** — choose **3** and enter the hub's address.
+  Use its `.local` mDNS name (`http://bench.local:8000`), not a raw IP — a raw
+  IP breaks when the DHCP lease changes. `guppi-rack` then prints a **claim
+  code** you enter once in the dashboard.
+
+You can skip the menu by setting the address up front:
+`GUPPI_AGENT_URL=http://bench.local:8000 sudo -E bash …/install.sh`.
+
+`guppi-rack` scans USB/VISA and the local Ethernet segment for instruments and
+prints what it found. The rig appears in the dashboard within a few seconds of
+`guppi-rack` starting. Your device layout lives in
+**`/etc/guppi-rack/rig_config.yml`** (outside the source tree, so hub upgrades
+don't touch it) — see [drivers.md](drivers.md) to add an instrument.
+
+Like the hub, `guppi-rack` runs in the foreground (Ctrl-C to stop). To keep it
+running after an SSH logout, start it inside `tmux` (`tmux new -s rack`) the
+same way as the hub.
 
 ## 4. Use it
 
