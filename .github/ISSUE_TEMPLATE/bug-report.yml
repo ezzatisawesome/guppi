@@ -30,8 +30,8 @@ body:
       label: Logs
       description: >
         For install failures: the installer output. For runtime issues: the
-        last screen of `guppi-hub` output from its tmux session
-        (`tmux attach -t hub`). Paste as text, not screenshots.
+        last screen of `guppi-hub` output (from the terminal running it). Paste
+        as text, not screenshots.
       render: shell
   - type: textarea
     id: instruments
