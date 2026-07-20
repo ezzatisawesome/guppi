@@ -186,5 +186,5 @@ just uses the one direction that matters (`op: ">="` for an upper ceiling,
 ### Validate before you run
 
 ```bash
-guppi-rack config check      # validates the config (ids, driver types, YAML) without connecting
+guppi rack config check      # validates the config (ids, driver types, YAML) without connecting
 ```
