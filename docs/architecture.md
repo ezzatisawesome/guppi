@@ -29,7 +29,7 @@ offline forever.
 │  postgres               the one data path: same engine, schema, and    │
 │                         queries as every other Guppi deployment        │
 │                                                                       │
-│  rack (guppi-rack)      device I/O: VISA/SCPI/CAN instruments. Dials   │
+│  rack (guppi rack)      device I/O: VISA/SCPI/CAN instruments. Dials   │
 │                         OUT to the broker; nothing connects in to it.  │
 └───────────────────────────────────────────────────────────────────────┘
          ▲ LAN browsers (read-only view; actions go through the hub)
