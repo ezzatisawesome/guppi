@@ -153,8 +153,11 @@ Re-running the installer by hand does exactly the same thing.
 
 ## Pinning a version
 
-Each release carries its own installer, pre-pinned:
+The command above always installs the latest release. To pin a specific one,
+take its tag from the [releases page](https://github.com/ezzatisawesome/guppi/releases)
+(releases are tagged `v0.1.0-rc.N`) and use that release's own pre-pinned
+installer:
 
 ```
-curl -fsSL https://github.com/ezzatisawesome/guppi/releases/download/v0.1.0/install.sh | sudo bash
+curl -fsSL https://github.com/ezzatisawesome/guppi/releases/download/v0.1.0-rc.10/install.sh | sudo bash
 ```
