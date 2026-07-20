@@ -1,8 +1,12 @@
 # Instrument drivers
 
-Guppi ships drivers for common bench instruments (B&K Precision supplies,
-Chroma loads, Siglent scopes, …). When your instrument isn't covered — or you
-want the rack to read a custom board — you write a driver: one Python class.
+Guppi ships a large driver library — 200+ instruments across power supplies,
+electronic loads, DMMs, oscilloscopes, spectrum / network / signal analyzers,
+SMUs, function generators, lock-ins, magnet controllers, motion, photonics,
+temperature, and vacuum. They live under
+`packages/rack/src/devices/<category>/`; the one nearest your instrument is the
+best template. When your instrument isn't covered — or you want the rack to read
+a custom board — you write a driver: one Python class.
 
 ## How the rack finds drivers
 
@@ -28,6 +32,28 @@ At startup the rack logs `Loaded N driver(s) from config path: …` for each
 source that contributed. A driver class is picked up if it subclasses the
 rack's `Device` base and isn't abstract; classes whose name starts with `_`
 are treated as private shared bases and skipped.
+
+## Start from the right base
+
+Most drivers subclass a **family base** that already implements the tedious
+parts, not `Device` directly. Pick the closest fit:
+
+| Base | For | Gives you |
+| --- | --- | --- |
+| `Device` | anything — a custom board, serial sensor, CAN DUT | the raw contract: you implement `signals()` + `measure()` |
+| `ScpiInstrument` | a one-shot SCPI instrument (DMM, power meter) | a managed thread-safe `scpi` codec + connect/identify wiring |
+| `ChannelInstrument` | N channels each reporting voltage & current — power supplies, electronic loads | per-channel `1.voltage` / `1.current` signals, channel select, and an `energizing` output capability |
+| `ScpiScope` | oscilloscopes | the shared arm → trigger → fetch-waveform contract with artifact publishing |
+| `SweptAnalyzer` | swept-frequency analyzers (spectrum / network / signal) | the arm → sweep → fetch-trace contract with swept-trace artifacts |
+
+Subclass the family, fill in the SCPI specifics for your model, and the
+capture/streaming plumbing comes for free — every base has a working example
+next to yours under `packages/rack/src/devices/`.
+
+**Scaffold one** with `make new-driver NAME=MyDevice` (add `KIND=psu` for a
+channel-instrument skeleton, `KIND=sensor` for a bespoke `Device`); it writes a
+driver stub and a matching test you fill in. The sections below show a driver
+from scratch on the raw `Device` base.
 
 ## A minimal driver
 
