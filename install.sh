@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Guppi installer — one command on a Raspberry Pi / Debian box:
+# Guppi installer — one script, two components:
 #
 #   curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
+#     → hub (the default): the bench servers — everything documented below
+#   ... | sudo bash -s -- rack
+#     → rack: device I/O on the machine wired to the instruments. Resolves the
+#       rack component — a checkout beside this script (dev/CI), the tree a hub
+#       install left at /opt/guppi/src, or the release source tarball — then
+#       hands over to packages/rack/install.sh with args passed through.
 #
-# Uninstall:  ... | sudo bash -s -- --uninstall     (add GUPPI_PURGE_DATA=1
-#             to also drop the database and /var/lib/guppi)
+# Uninstall:  ... | sudo bash -s -- --uninstall          (hub; GUPPI_PURGE_DATA=1
+#             ... | sudo bash -s -- rack --uninstall      also drops the database)
 #
 # (Canonical source lives in the monorepo at scripts/install.sh; the release
 # workflow publishes it to the public distribution repo's root.)
@@ -24,7 +30,7 @@
 # nothing auto-starts. Data lives in /var/lib/guppi; the dashboard is
 # at http://<host>:8000 while guppi-hub runs. Zero cloud, zero account, zero
 # login. Pair a bench by running
-#   sudo bash /opt/guppi/src/packages/rack/install.sh
+#   curl ... | sudo bash -s -- rack
 # on the machine wired to the instruments — on this same box it auto-claims
 # over loopback.
 #
@@ -66,6 +72,47 @@ LAUNCHER=/usr/local/bin/guppi-hub
 # The operator owns and runs everything (like the rack): whoever invoked sudo.
 RUN_USER="${SUDO_USER:-root}"
 
+# ── Component routing ───────────────────────────────────────────────────────
+# `... rack [args]` resolves the rack component and hands over to it entirely
+# (args pass through, so `rack --uninstall` works). Resolution order: a
+# checkout beside this script (dev/CI), a tree a hub install already left at
+# /opt/guppi/src (the co-located case — no second download), or the release
+# source tarball. No hub preflight runs on this path: the rack has no apt,
+# systemd, or PostgreSQL requirements.
+COMPONENT=hub
+case "${1:-}" in hub|rack) COMPONENT="$1"; shift ;; esac
+
+if [ "$COMPONENT" = rack ]; then
+  SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-/nonexistent}")" 2>/dev/null && pwd || true)
+  for RACK_SH in ${SELF_DIR:+"$SELF_DIR/../packages/rack/install.sh"} \
+                 "$GUPPI_HOME/src/packages/rack/install.sh"; do
+    if [ -f "$RACK_SH" ]; then exec bash "$RACK_SH" "$@"; fi
+  done
+  if [ "${1:-}" = "--uninstall" ]; then
+    fail "no rack install found on this box — nothing to uninstall."
+  fi
+  echo "── Fetching guppi source (rack component, ${GUPPI_REF:-latest release}) ──"
+  TMPD=$(mktemp -d /tmp/guppi-install.XXXXXX)
+  fetch() { curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 "$@"; }
+  if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
+    cp "$GUPPI_SRC_TARBALL" "$TMPD/guppi-src.tar.gz"
+  else
+    if [ -z "$GUPPI_REF" ]; then
+      # Response into a variable FIRST (see latest_tag below for why no pipe).
+      JSON=$(fetch "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null || true)
+      GUPPI_REF=$(grep -m1 '"tag_name"' <<<"$JSON" | cut -d'"' -f4 || true)
+      [ -n "$GUPPI_REF" ] || { rm -rf "$TMPD"; fail "No public release found on $REPO — set GUPPI_REF to a tag."; }
+    fi
+    fetch -o "$TMPD/guppi-src.tar.gz" \
+      "https://github.com/$REPO/releases/download/$GUPPI_REF/guppi-src.tar.gz" \
+      || { rm -rf "$TMPD"; fail "No guppi-src.tar.gz asset on release $GUPPI_REF"; }
+  fi
+  mkdir -p "$GUPPI_HOME/src"
+  tar -xzf "$TMPD/guppi-src.tar.gz" -C "$GUPPI_HOME/src" --strip-components=1
+  rm -rf "$TMPD"   # exec replaces this process, so clean up before handing over
+  exec bash "$GUPPI_HOME/src/packages/rack/install.sh" "$@"
+fi
+
 # ── Uninstall ────────────────────────────────────────────────────────────────
 # Reverses everything this installer wrote. Data (the database and
 # /var/lib/guppi) survives unless GUPPI_PURGE_DATA=1 — an uninstall shouldn't
@@ -80,6 +127,12 @@ if [ "${1:-}" = "--uninstall" ] || [ "${GUPPI_UNINSTALL:-0}" = "1" ]; then
         /etc/systemd/journald.conf.d/guppi.conf
   systemctl daemon-reload
   rm -f "$LAUNCHER"
+  # /usr/local/bin/guppi symlinks into /opt/guppi's cli venv — remove it with
+  # the tree (never a pipx/pip-installed CLI, which lives elsewhere).
+  { [ -L /usr/local/bin/guppi ] \
+      && case "$(readlink /usr/local/bin/guppi)" in
+           "$GUPPI_HOME"/*) rm -f /usr/local/bin/guppi ;;
+         esac; } || true
   rm -rf "$GUPPI_HOME" "$GUPPI_ETC"
   rm -f /usr/local/bin/nats-server /usr/local/bin/postgrest
   if [ "${GUPPI_PURGE_DATA:-0}" = "1" ]; then
@@ -287,7 +340,7 @@ fi
 # Upgrades happen with the hub STOPPED — swapping the tree under a running
 # server is a coin flip. Keep the old tree (and its venv) as src.prev until
 # the new hub proves it starts; a failed upgrade rolls back.
-hub_answers && fail "guppi-hub is running — stop it first (Ctrl-C in the terminal running it) and re-run."
+hub_answers && fail "the hub is running — stop it first (Ctrl-C in the terminal running guppi hub) and re-run."
 UPGRADING=0
 if [ -d "$GUPPI_HOME/src" ]; then
   UPGRADING=1
@@ -445,7 +498,7 @@ preflight_port() {   # name=\$1 port=\$2
       echo "" >&2
       echo "  ✗ port \$2 (\$1) is already in use by pid \$pid, which isn't a guppi process:" >&2
       echo "      \$(proc_cmd "\$pid")" >&2
-      echo "    Stop that process (or free the port), then run guppi-hub again." >&2
+      echo "    Stop that process (or free the port), then run guppi hub again." >&2
       exit 1
     fi
   done
@@ -478,6 +531,18 @@ trap 'kill \$HUB_PID \$NATS_PID \$PGRST_PID 2>/dev/null; wait' INT TERM EXIT
 wait \$HUB_PID
 EOF
 chmod 755 "$LAUNCHER"
+
+# ── the `guppi` CLI ──────────────────────────────────────────────────────────
+# One real `guppi` on every machine — no dispatcher shim. This is the same
+# Python CLI laptops pipx-install; built here from the shipped tree (frozen
+# lock, same pattern as the agent venv above) and linked onto PATH. Its
+# `hub`/`rack` subcommands exec the co-installed launchers.
+( cd "$GUPPI_HOME/src/packages/cli" \
+  && { sudo -u "$RUN_USER" uv sync --frozen --no-dev -q \
+       || { echo "   uv sync (cli) failed — retrying once"; sleep 3; sudo -u "$RUN_USER" uv sync --frozen --no-dev -q; }; } )
+"$GUPPI_HOME/src/packages/cli/.venv/bin/guppi" --help >/dev/null \
+  || fail "guppi CLI built but doesn't run — re-run the installer."
+ln -sf "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi" /usr/local/bin/guppi
 
 # Verify before claiming success: start the hub as the operator, wait for it
 # to answer, stop it. A failed upgrade rolls back to the previous tree.
@@ -520,7 +585,7 @@ if ! smoke_hub "$TMPD/hub-smoke.log"; then
       rm -rf "$GUPPI_HOME/ui"; mv "$GUPPI_HOME/ui.prev" "$GUPPI_HOME/ui"
     fi
     smoke_hub "$TMPD/hub-rollback.log" \
-      && echo "✓ Rollback verified — $PREV_REF starts. Run: guppi-hub" >&2 \
+      && echo "✓ Rollback verified — $PREV_REF starts. Run: guppi hub" >&2 \
       || echo "✗ Rollback didn't start either — log: $GUPPI_ETC (re-run installer)" >&2
     fail "Upgrade to $GUPPI_REF failed (rolled back). Hub log excerpt above."
   fi
@@ -536,15 +601,17 @@ echo "✓ Guppi $GUPPI_REF installed."
 echo ""
 echo "  Start the bench (foreground — logs in your terminal, Ctrl-C stops it):"
 echo ""
-echo "    guppi-hub                 # NATS + PostgREST + hub"
+echo "    guppi hub                 # NATS + PostgREST + hub"
 echo ""
-echo "  Dashboard:  http://${IP:-<this-host>}:8000   (while guppi-hub runs)"
-echo "  Bench:      sudo bash /opt/guppi/src/packages/rack/install.sh"
-echo "              on the instrument machine, then run: guppi-rack"
-echo "              (this box: it auto-claims over loopback — no code to type)"
-echo "  Upgrade:    stop guppi-hub, re-run this installer"
+echo "  Dashboard:  http://${IP:-<this-host>}:8000   (while the hub runs)"
+echo "  Bench:      curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh \\"
+echo "                | sudo bash -s -- rack"
+echo "              on the instrument machine, then run: guppi rack"
+echo "              (this box: same command — it finds the tree already here,"
+echo "               and the rack auto-claims over loopback, no code to type)"
+echo "  Upgrade:    stop the hub, then: guppi update"
 echo ""
-echo "  NOTE: nothing auto-starts on boot — after a reboot, run guppi-hub again."
+echo "  NOTE: nothing auto-starts on boot — after a reboot, run guppi hub again."
 if [ "$UPGRADING" = 1 ] && [ -x /usr/local/bin/guppi-rack ]; then
   echo ""
   echo "  NOTE: the source tree was replaced and the rack venv with it —"
