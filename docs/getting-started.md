@@ -92,8 +92,8 @@ You can skip the menu by setting the address up front:
 `guppi rack` scans USB/VISA and the local Ethernet segment for instruments and
 prints what it found. The rig appears in the dashboard within a few seconds of
 `guppi rack` starting. Your device layout lives in
-**`/etc/guppi-rack/rig_config.yml`** (outside the source tree, so hub upgrades
-don't touch it) — see [drivers.md](drivers.md) to add an instrument, or use
+**`~/.guppi/rig_config.yml`** (in your home, so hub upgrades don't touch it and
+you can edit it without sudo) — see [drivers.md](drivers.md) to add an instrument, or use
 `guppi rack devices add` (guided wizard) and `guppi rack config check`.
 
 Like the hub, `guppi rack` runs in the foreground (Ctrl-C to stop). To keep it
