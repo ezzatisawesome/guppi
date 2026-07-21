@@ -51,7 +51,7 @@ The installer is idempotent — fix the cause and re-run it. Common causes:
   segment).
 - Separate rack machine: it must reach the hub — `curl http://<hub>:8000/health`
   from the rack box. If you paired against a raw LAN IP and the hub's address
-  changed with a DHCP lease, edit `/etc/guppi-rack.env` to the `.local` mDNS
+  changed with a DHCP lease, edit `~/.guppi/config.env` to the `.local` mDNS
   name and restart `guppi rack`.
 - Claim code entered but "rig offline": the rack keeps retrying — give it ~10 s,
   then check the rack terminal for connection errors.
