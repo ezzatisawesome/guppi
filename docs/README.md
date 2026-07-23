@@ -14,6 +14,10 @@ upgrading (`guppi update`) and pinning a version.
 - [**Run tests from your terminal**](getting-started.md#5-run-tests-from-your-terminal-optional)
   — the `guppi` CLI: `guppi rigs`, `guppi run <test>`, `guppi results`,
   `guppi abort`.
+- [**Writing tests**](openhtf-authoring-guide.md) — authoring OpenHTF test
+  scripts to Guppi standards: the `TEST_PHASES` contract, measurements and
+  limits, prompts, the three safety layers, declarative sweeps, and capturing
+  waveforms/sweep metrics by reference.
 - [**Direct data access**](data-access.md) — your data is a normal Postgres:
   query it with `psql`, PostgREST (HTTP/JSON), pandas, or Grafana. No export
   ceremony.
