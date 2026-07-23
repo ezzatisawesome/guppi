@@ -51,9 +51,10 @@ capture/streaming plumbing comes for free — every base has a working example
 next to yours under `packages/rack/src/devices/`.
 
 **Scaffold one** with `make new-driver NAME=MyDevice` (add `KIND=psu` for a
-channel-instrument skeleton, `KIND=sensor` for a bespoke `Device`); it writes a
-driver stub and a matching test you fill in. The sections below show a driver
-from scratch on the raw `Device` base.
+channel-instrument skeleton; the default `KIND=sensor` is a bespoke `Device`).
+It writes a ready-to-edit driver stub under `packages/rack/drivers/` (override
+with `DIR=`) and prints the `rig_config.yml` snippet to wire it in. The sections
+below show a driver from scratch on the raw `Device` base.
 
 ## A minimal driver
 
