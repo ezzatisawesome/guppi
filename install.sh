@@ -162,8 +162,11 @@ command -v apt-get >/dev/null 2>&1 \
 
 ARCH=$(uname -m)
 case "$ARCH" in
-  aarch64|arm64) PGRST_ARCH="ubuntu-aarch64"; NATS_ARCH="arm64" ;;
-  x86_64)        PGRST_ARCH="linux-static-x86-64"; NATS_ARCH="amd64" ;;
+  # PostgREST renamed its arm64 asset in v16.0 (ubuntu-aarch64 →
+  # linux-static-aarch64); older releases (incl. the pinned fallback) only
+  # have the old name, so list both and try in order.
+  aarch64|arm64) PGRST_ARCHES="linux-static-aarch64 ubuntu-aarch64"; NATS_ARCH="arm64" ;;
+  x86_64)        PGRST_ARCHES="linux-static-x86-64"; NATS_ARCH="amd64" ;;
   armv7l|armv6l)
     fail "32-bit OS detected ($ARCH). Guppi needs a 64-bit OS — on a Pi 4/5, flash the 64-bit Raspberry Pi OS image." ;;
   *) fail "Unsupported architecture: $ARCH (need arm64 or amd64)" ;;
@@ -380,9 +383,14 @@ if ! command -v nats-server >/dev/null 2>&1; then
 fi
 if ! command -v postgrest >/dev/null 2>&1; then
   PGRST_VER=$(latest_tag PostgREST/postgrest v14.15)
-  fetch -o "$TMPD/postgrest.tar.xz" \
-    "https://github.com/PostgREST/postgrest/releases/download/$PGRST_VER/postgrest-$PGRST_VER-$PGRST_ARCH.tar.xz" \
-    || fail "Couldn't download PostgREST $PGRST_VER"
+  PGRST_OK=""
+  for PGRST_ARCH in $PGRST_ARCHES; do
+    if fetch -o "$TMPD/postgrest.tar.xz" \
+      "https://github.com/PostgREST/postgrest/releases/download/$PGRST_VER/postgrest-$PGRST_VER-$PGRST_ARCH.tar.xz"; then
+      PGRST_OK=1; break
+    fi
+  done
+  [ -n "$PGRST_OK" ] || fail "Couldn't download PostgREST $PGRST_VER (tried: $PGRST_ARCHES)"
   tar -xJf "$TMPD/postgrest.tar.xz" -C /usr/local/bin postgrest
 fi
 
