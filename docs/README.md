@@ -14,6 +14,8 @@ upgrading (`guppi update`) and pinning a version.
 - [**Run tests from your terminal**](getting-started.md#5-run-tests-from-your-terminal-optional)
   — the `guppi` CLI: `guppi rigs`, `guppi run <test>`, `guppi results`,
   `guppi abort`.
+- [**CLI reference**](cli.md) — every `guppi` command and option on one page:
+  running tests, exporting results, rig config checks, servers, update/uninstall.
 - [**Writing tests**](openhtf-authoring-guide.md) — authoring OpenHTF test
   scripts to Guppi standards: the `TEST_PHASES` contract, measurements and
   limits, prompts, the three safety layers, declarative sweeps, and capturing
