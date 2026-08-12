@@ -1,59 +1,108 @@
 # Guppi
 
 Guppi turns a Raspberry Pi (or any Debian box) into a self-contained lab bench:
-live telemetry, instrument control, test sequencing, and a web dashboard. It runs
-entirely on your network — no cloud, no account, no login.
+live telemetry, instrument control, automated test sequencing, and a web
+dashboard. It runs entirely on your network — no cloud, no account, no login.
+
+It speaks to your hardware through 200+ built-in instrument drivers (power
+supplies, electronic loads, DMMs, oscilloscopes, SMUs, RF analyzers,
+temperature controllers, and more), auto-detected on the bus — and runs test
+scripts written against [OpenHTF](https://github.com/google/openhtf), with
+measurements streaming live to the dashboard as they're taken.
+
+## Quick start
+
+```
+curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
+guppi hub          # the server side — leave it running
+
+curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash -s -- rack
+guppi rack         # the instrument side — scans your bench and pairs
+
+# then open http://<pi>:8000 from any browser on your LAN
+```
+
+Details below.
 
 ## Install the hub
 
-On the Pi:
+The hub is the server side: database, message broker, dashboard, and test
+orchestration. On the Pi:
 
 ```
 curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
 ```
 
-The installer sets up PostgreSQL (a system service), PostgREST, NATS, and the
-Guppi hub, then hands you one command:
+One command, ~2–4 minutes. The installer sets up PostgreSQL (a system
+service), PostgREST, NATS, and the Guppi hub, then hands you one command:
 
 ```
-guppi-hub    # runs all servers in the foreground — logs in your terminal, Ctrl-C stops them
+guppi hub    # runs all servers in the foreground — logs in your terminal, Ctrl-C stops them
 ```
 
 While it runs, the dashboard is at `http://<pi>:8000` for any browser on your
 LAN. The Guppi servers are not daemons — closing the terminal stops them, and
-after a reboot you run `guppi-hub` again. To keep it running after you log out
+after a reboot you run `guppi hub` again. To keep it running after you log out
 of an SSH session, start it inside a terminal multiplexer you install yourself
 (`sudo apt install tmux`, then `tmux new -s hub`) or under `nohup`.
 
 - **Pin a version** (installer and assets come from the same release):
 
   ```
-  curl -fsSL https://github.com/ezzatisawesome/guppi/releases/download/v0.1.0/install.sh | sudo bash
+  curl -fsSL https://github.com/ezzatisawesome/guppi/releases/download/<tag>/install.sh | sudo bash
   ```
 
-  Each release carries its own `install.sh`, pinned to that release. The one on
-  `main` installs the latest.
-- **Upgrade**: re-run the installer.
+  Each [release](https://github.com/ezzatisawesome/guppi/releases) carries its
+  own `install.sh`, pinned to that release. The one on `main` installs the
+  latest.
+- **Upgrade**: `guppi update` (or re-run the installer).
 
 ## Connect your instruments
 
-On the machine wired to the bench (the same Pi works fine):
+The rack is the instrument side — it runs on the machine physically wired to
+the bench (the same Pi is the common case). Same installer, `rack` component:
 
 ```
-sudo bash /opt/guppi/src/packages/rack/install.sh
-guppi-rack
+curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash -s -- rack
+guppi rack
 ```
 
-`guppi-rack` scans for USB/VISA and Ethernet instruments and pairs with the
-hub. On the same box it claims automatically over loopback. On another LAN
+The installer asks which hub this rack should pair with (this machine, a hub
+elsewhere on your LAN, or Guppi Cloud). On startup `guppi rack` scans for
+USB/VISA and Ethernet instruments and prints what it found, then pairs with
+the hub. On the same box it claims automatically over loopback; on another LAN
 machine it prints a claim code you enter once in the dashboard.
+
+Devices, networked-instrument discovery, and safety abort limits are declared
+in `rig_config.yml` — see [Configuring your rig](docs/rig-config.md). Validate
+a config before booting with `guppi rack config check`.
+
+## Run tests
+
+Tests are plain Python files using OpenHTF, dropped into the rig's workspace.
+Your configured instruments are injected as plugs (`PSU1`, `LOAD1`, …), and
+helpers cover parameter sweeps, operator prompts, waveform capture, and
+watchdog safety limits. Run them from the dashboard, or from any machine with
+the `guppi` CLI:
+
+```
+guppi run <test> [--rig R]   # plan, approve, run; answer prompts inline
+guppi results [-o DIR]       # export the latest run: run.json + measurements.csv + scope/
+guppi abort                  # stop the running test
+guppi rigs                   # list paired rigs
+```
+
+See [Writing tests](docs/openhtf-authoring-guide.md) to get started.
 
 ## Docs
 
 - [Getting started](docs/getting-started.md) — blank SD card to live telemetry.
-- [Troubleshooting](docs/troubleshooting.md) — services, logs, the common failures.
+- [Configuring your rig](docs/rig-config.md) — the full `rig_config.yml` reference: devices, discovery, safety limits.
+- [Writing tests](docs/openhtf-authoring-guide.md) — the OpenHTF test contract: phases, measurements, sweeps, prompts.
+- [CLI reference](docs/cli.md) — every `guppi` command and option on one page.
 - [Instrument drivers](docs/drivers.md) — how drivers load, and how to write one for your instrument or board.
 - [Direct data access](docs/data-access.md) — psql, PostgREST, pandas, Grafana; your database is yours.
+- [Troubleshooting](docs/troubleshooting.md) — services, logs, the common failures.
 - [Architecture](docs/architecture.md) — how the single-box install works under the hood.
 
 ## What this repo is
@@ -69,7 +118,7 @@ requests. Pull requests here can't be merged.
 
 - **Something broke** → [open a bug report](../../issues/new?template=bug-report.yml)
   with your release version (`cat /etc/guppi/version`) and the last screen of
-  `guppi-hub` output.
+  `guppi hub` output.
 - **An instrument you want supported** → [instrument request](../../issues/new?template=instrument-request.yml)
   with its `*IDN?` string.
 - **Questions and ideas** → [Discussions](../../discussions).
