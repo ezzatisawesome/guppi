@@ -57,6 +57,11 @@ Key consequences you must design around:
 | Where tests live | rig workspace `tests/*.py` (e.g. `/home/guppi/workspace/tests/` on a Pi) |
 | Where hardware is declared | `rig_config.yml` (installed at `~/.guppi/rig_config.yml`) |
 
+To run what you write: save it as `tests/<name>.py` in the rig workspace, then
+run it from the dashboard's test panel or with `guppi run <name>` (a path to a
+`.py` file also works) — see the [CLI reference](cli.md). Results come back via
+`guppi results` or the dashboard.
+
 Two runtime modes, transparent to the script:
 
 - **Local ("Pi") mode** — `agent` backend, LAN-only, no auth, no AI.
@@ -315,7 +320,9 @@ def characterize(test, PSU, LOAD):
 ```
 
 `sweep` is sequential by construction (command → settle → measure) — the correct,
-reproducible ordering for qualification. **Do not assign the row list to a
+reproducible ordering for qualification. An optional `on_point=` callback is
+invoked after each point with `(point, values)` — useful for a progress log or
+an early-exit check between steps. **Do not assign the row list to a
 measurement** (§4), and **do not hand it to `capture_artifact` as `{"rows": …}`** —
 that raises `KeyError: 'v'` (§7). Persist each metric as its own series.
 
@@ -646,6 +653,31 @@ where `panel_curve(irradiance, temp)` returns a validated `SasCurve` (Isc ∝
 irradiance; Voc down with temperature via the panel tempco). Each write is
 atomically validated against the module envelope, so an out-of-envelope
 (irradiance, temp) point fails loudly at that step.
+
+### 9.8 Pace a timed slew against a deadline, not a fixed sleep
+
+A slew that re-programs the curve once per second over a fixed duration must pace
+against an **absolute deadline**. Every `rig.send` is a blocking round-trip to the
+rack, so a fixed sleep *per step* adds to that latency rather than absorbing it:
+
+```python
+# WRONG — wall-clock = DURATION_S + Σ(send latency). With 2 channels
+# (2 sends/step) this ran a 300 s sweep in ~10 min (field test 2026-08-04).
+for k in range(steps):
+    apply_curve(k)
+    rig.sleep(STEP_S * 1000)
+
+# RIGHT — latency is absorbed; total ≈ DURATION_S.
+t0 = Date.now()
+for k in range(steps):
+    apply_curve(k)
+    rig.sleep(t0 + (k + 1) * STEP_S * 1000 - Date.now())
+```
+
+If a step's sends exceed `STEP_S` the sleep goes non-positive and the loop simply
+proceeds — the true floor is `steps × send-latency`, so raise `STEP_S` if that
+dominates. Note this changes *pacing only*: the curve values per step are
+unchanged, so the physical sweep is identical, just on schedule.
 
 ---
 
