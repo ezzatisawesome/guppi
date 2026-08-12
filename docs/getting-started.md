@@ -73,7 +73,7 @@ The rack installer asks which hub this rack should pair with:
 
 ```
 Which agent should this rack pair with?
-    1) Guppi Cloud   — https://app.guppidev.com   (hosted; default)
+    1) Guppi Cloud   — https://guppi-agent.fly.dev   (hosted; default)
     2) This machine  — http://127.0.0.1:8000       (a hub running on this box)
     3) Custom URL    — a self-host agent on your LAN (e.g. http://bench.local:8000)
 ```
@@ -159,5 +159,5 @@ take its tag from the [releases page](https://github.com/ezzatisawesome/guppi/re
 installer:
 
 ```
-curl -fsSL https://github.com/ezzatisawesome/guppi/releases/download/v0.1.0-rc.10/install.sh | sudo bash
+curl -fsSL https://github.com/ezzatisawesome/guppi/releases/download/v0.1.0-rc.43/install.sh | sudo bash
 ```
