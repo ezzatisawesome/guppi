@@ -82,6 +82,31 @@ RUN_USER="${SUDO_USER:-root}"
 COMPONENT=hub
 case "${1:-}" in hub|rack) COMPONENT="$1"; shift ;; esac
 
+# ── Access gate ──────────────────────────────────────────────────────────────
+# Guppi is invite-only: installing requires a valid access code, validated
+# against the hosted checker. Skipped for uninstall (below), for air-gapped/CI
+# installs (GUPPI_SRC_TARBALL), and for an explicit GUPPI_ACCESS_SKIP=1.
+check_access() {
+  [ "${GUPPI_ACCESS_SKIP:-0}" = "1" ] && return 0
+  [ -n "${GUPPI_SRC_TARBALL:-}" ] && return 0
+  local url="${GUPPI_ACCESS_URL:-https://guppi-agent.fly.dev}"
+  local code="${GUPPI_ACCESS_CODE:-}"
+  [ -n "$code" ] || fail "An access code is required. Re-run with:
+    ... | sudo GUPPI_ACCESS_CODE=YOUR_CODE bash
+  Don't have one? Join the waitlist at https://app.guppidev.com/waitlist"
+  local resp
+  resp=$(curl -fsS --connect-timeout 15 -X POST "$url/access/check" \
+    -H "Content-Type: application/json" -d "{\"code\":\"$code\"}" 2>/dev/null || true)
+  case "$resp" in
+    *'"valid":true'*)  echo "  ✓ access code accepted" ;;
+    *'"valid":false'*) fail "That access code isn't valid. Join the waitlist at https://app.guppidev.com/waitlist" ;;
+    *)                 fail "Couldn't reach the access validator at $url — check your connection and retry." ;;
+  esac
+}
+if [ "${1:-}" != "--uninstall" ] && [ "${GUPPI_UNINSTALL:-0}" != "1" ]; then
+  check_access
+fi
+
 if [ "$COMPONENT" = rack ]; then
   SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-/nonexistent}")" 2>/dev/null && pwd || true)
   for RACK_SH in ${SELF_DIR:+"$SELF_DIR/../packages/rack/install.sh"} \
@@ -162,8 +187,11 @@ command -v apt-get >/dev/null 2>&1 \
 
 ARCH=$(uname -m)
 case "$ARCH" in
-  aarch64|arm64) PGRST_ARCH="ubuntu-aarch64"; NATS_ARCH="arm64" ;;
-  x86_64)        PGRST_ARCH="linux-static-x86-64"; NATS_ARCH="amd64" ;;
+  # PostgREST renamed its arm64 asset in v16.0 (ubuntu-aarch64 →
+  # linux-static-aarch64); older releases (incl. the pinned fallback) only
+  # have the old name, so list both and try in order.
+  aarch64|arm64) PGRST_ARCHES="linux-static-aarch64 ubuntu-aarch64"; NATS_ARCH="arm64" ;;
+  x86_64)        PGRST_ARCHES="linux-static-x86-64"; NATS_ARCH="amd64" ;;
   armv7l|armv6l)
     fail "32-bit OS detected ($ARCH). Guppi needs a 64-bit OS — on a Pi 4/5, flash the 64-bit Raspberry Pi OS image." ;;
   *) fail "Unsupported architecture: $ARCH (need arm64 or amd64)" ;;
@@ -380,9 +408,14 @@ if ! command -v nats-server >/dev/null 2>&1; then
 fi
 if ! command -v postgrest >/dev/null 2>&1; then
   PGRST_VER=$(latest_tag PostgREST/postgrest v14.15)
-  fetch -o "$TMPD/postgrest.tar.xz" \
-    "https://github.com/PostgREST/postgrest/releases/download/$PGRST_VER/postgrest-$PGRST_VER-$PGRST_ARCH.tar.xz" \
-    || fail "Couldn't download PostgREST $PGRST_VER"
+  PGRST_OK=""
+  for PGRST_ARCH in $PGRST_ARCHES; do
+    if fetch -o "$TMPD/postgrest.tar.xz" \
+      "https://github.com/PostgREST/postgrest/releases/download/$PGRST_VER/postgrest-$PGRST_VER-$PGRST_ARCH.tar.xz"; then
+      PGRST_OK=1; break
+    fi
+  done
+  [ -n "$PGRST_OK" ] || fail "Couldn't download PostgREST $PGRST_VER (tried: $PGRST_ARCHES)"
   tar -xJf "$TMPD/postgrest.tar.xz" -C /usr/local/bin postgrest
 fi
 
