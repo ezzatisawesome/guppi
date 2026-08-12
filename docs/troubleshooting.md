@@ -49,6 +49,11 @@ The installer is idempotent — fix the cause and re-run it. Common causes:
 - Is `guppi rack` actually running on the bench machine, and did it print a
   scan result? Instruments must be visible to it (USB permissions, Ethernet
   segment).
+- A USB instrument visible to the OS but missing from the scan can be a
+  permission problem: the rack installer grants serial/USB access via udev
+  rules and applies them to already-attached devices. If the installer printed
+  a udev warning, replug the instrument (or reboot) so the rules apply, then
+  restart `guppi rack`.
 - Separate rack machine: it must reach the hub — `curl http://<hub>:8000/health`
   from the rack box. If you paired against a raw LAN IP and the hub's address
   changed with a DHCP lease, edit `~/.guppi/config.env` to the `.local` mDNS
