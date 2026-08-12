@@ -71,31 +71,10 @@ parameters **by name**) and calls `connect()`.
   type: PowerBoard
   role: dut
   discover: true                 # signals arrive from a runtime manifest (hot-plug/async)
-  can_device: /dev/serial/by-id/usb-…-if00   # driver kwargs: PowerBoard(can_device=..., bitrate=..., node_id=...)
+  can_device: auto               # driver kwargs: PowerBoard(can_device=..., bitrate=..., node_id=...)
   bitrate: 1000000
   node_id: 20
 ```
-
-A vendor-library device is the same shape — an MCC USB-1608G multifunction DAQ
-(`pip install 'guppi-rack[daq]'` for the `uldaq` bindings):
-
-```yaml
-- id: daq1
-  name: "Bench DAQ"
-  type: MccUsb1608G
-  role: device                   # rack equipment, not the thing under test
-  # unique_id: "01F5A9C2"        # serial, to pin one box when the rack has several
-  differential: false            # false -> 16 single-ended AI; true -> 8 differential
-  ai_range: 10                   # AI full scale in volts: 10, 5, 2 or 1
-  ai_channels: 8                 # expose only the wired inputs (default: all)
-  scan_rate: 1000                # hardware-paced samples/channel/s; 0 -> software-paced
-  dio_outputs: [0, 1]            # these DIO bits drive out; the rest read in
-```
-
-With `scan_rate` set this device is a **buffered** source: it runs a continuous
-hardware-paced scan and hands the telemetry drain loop every sample stamped from
-the scan clock, so it captures at its own rate rather than the rack's poll rate.
-Analog outputs are discovered at connect (2 on a USB-1608GX-2AO, none otherwise).
 
 **Rule of thumb:** SCPI over USB/LAN/serial → Shape 1. Anything with its own
 protocol/framing → Shape 2.
