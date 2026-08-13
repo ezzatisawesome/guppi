@@ -83,10 +83,13 @@ COMPONENT=hub
 case "${1:-}" in hub|rack) COMPONENT="$1"; shift ;; esac
 
 # ── Access gate ──────────────────────────────────────────────────────────────
-# Guppi is invite-only: installing requires a valid access code, validated
-# against the hosted checker. Skipped for uninstall (below), for air-gapped/CI
-# installs (GUPPI_SRC_TARBALL), and for an explicit GUPPI_ACCESS_SKIP=1.
+# Invite-gating the installer is OFF by default for now: install/update is open.
+# Re-enable by exporting GUPPI_ACCESS_ENFORCE=1 (then a valid access code is
+# required, validated against the hosted checker). Even when enforced, the gate
+# is skipped for uninstall (below), for air-gapped/CI installs (GUPPI_SRC_TARBALL),
+# and for an explicit GUPPI_ACCESS_SKIP=1.
 check_access() {
+  [ "${GUPPI_ACCESS_ENFORCE:-0}" = "1" ] || return 0
   [ "${GUPPI_ACCESS_SKIP:-0}" = "1" ] && return 0
   [ -n "${GUPPI_SRC_TARBALL:-}" ] && return 0
   local url="${GUPPI_ACCESS_URL:-https://guppi-agent.fly.dev}"
