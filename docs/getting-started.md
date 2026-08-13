@@ -100,6 +100,39 @@ Like the hub, `guppi rack` runs in the foreground (Ctrl-C to stop). To keep it
 running after an SSH logout, start it inside `tmux` (`tmux new -s rack`) the
 same way as the hub.
 
+### Drivers that need extra dependencies
+
+Most instruments (USB/VISA, serial, networked) work out of the box. A few driver
+families need an optional Python extra, and one needs a system library too:
+
+| Hardware | Extra | Also needs |
+|----------|-------|------------|
+| USB-CAN adapters (CAN DUTs) | `can` | — (installed by default) |
+| MCC / Digilent USB DAQ (USB-1608G…) | `daq` | MCC **libuldaq** (built from source) |
+
+The rack installer handles this automatically: if the hardware is plugged in
+when you run it, it detects the USB vendor, builds `libuldaq` from source when
+needed, and installs the matching extra into the **rack's own venv**. To opt in
+for hardware you'll plug in later, name the extras up front:
+
+```
+curl -fsSL …/install.sh | sudo GUPPI_RACK_EXTRAS=daq bash -s -- rack
+```
+
+Already running and hit `missing driver dependency … run 'guppi rack deps
+install <extra>'`? That command installs the extra into the rack's venv (not the
+CLI or hub venv — the three-venv trap it exists to avoid):
+
+```
+guppi rack deps install daq     # then, for MCC DAQs, ensure libuldaq is built
+guppi rack deps list            # see the available extras
+```
+
+`guppi rack config check` also preflights every enabled device's dependencies,
+so a missing extra is caught before boot with the exact fix — not as a runtime
+error at connect. (`libuldaq` is a C library that isn't on PyPI; the installer
+builds it, or see MCC's [uldaq releases](https://github.com/mccdaq/uldaq).)
+
 ## 4. Use it
 
 - **Dashboard** — live signals from every instrument the rack found.
