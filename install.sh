@@ -111,9 +111,13 @@ if [ "${1:-}" != "--uninstall" ] && [ "${GUPPI_UNINSTALL:-0}" != "1" ]; then
 fi
 
 if [ "$COMPONENT" = rack ]; then
+  # Only hand off to a rack install.sh sitting NEXT TO this script (a bundled or
+  # checked-out tree). Do NOT fall back to the on-disk $GUPPI_HOME tree here: a
+  # `curl | bash -s -- rack` update must fetch the pinned release below, not
+  # re-exec whatever stale copy is already installed (which silently pins the box
+  # to its current version). Air-gapped reuse still works via GUPPI_SRC_TARBALL.
   SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-/nonexistent}")" 2>/dev/null && pwd || true)
-  for RACK_SH in ${SELF_DIR:+"$SELF_DIR/../packages/rack/install.sh"} \
-                 "$GUPPI_HOME/src/packages/rack/install.sh"; do
+  for RACK_SH in ${SELF_DIR:+"$SELF_DIR/../packages/rack/install.sh"}; do
     if [ -f "$RACK_SH" ]; then exec bash "$RACK_SH" "$@"; fi
   done
   if [ "${1:-}" = "--uninstall" ]; then
