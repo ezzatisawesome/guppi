@@ -136,9 +136,9 @@ builds it, or see MCC's [uldaq releases](https://github.com/mccdaq/uldaq).)
 ## 4. Use it
 
 - **Dashboard** — live signals from every instrument the rack found.
-- **Data viewer** — history over any time window; data is kept for a bounded
-  window (7 days by default, `TELEMETRY_RETENTION_DAYS` in
-  `/etc/guppi/hub.env`), while test executions and captured artifacts are kept.
+- **Data viewer** — history over any time window; telemetry is kept
+  indefinitely (prune channels you don't need from the Storage tab to reclaim
+  space), and test executions and captured artifacts are kept.
 - **Tests** — run sequenced test scripts against the bench; results and
   waveform captures attach to each execution.
 - **Your data is yours** — the Postgres on the box is a normal Postgres; see
