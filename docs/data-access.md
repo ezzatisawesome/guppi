@@ -17,7 +17,7 @@ The tables you care about:
 
 | Table / view | What's in it |
 | --- | --- |
-| `telemetry` | raw frames within the retention window (`t0`, `rig_id`, `device_id`, `path`, `unit`, `dt_us[]`, `sample_values[]`) — one row per frame, samples packed into arrays |
+| `telemetry` | raw frames, kept indefinitely (`t0`, `rig_id`, `device_id`, `path`, `unit`, `dt_us[]`, `sample_values[]`) — one row per frame, samples packed into arrays |
 | `telemetry_points` | per-sample view that unpacks `telemetry` — one row per sample, with `recorded_at` (timestamp) and `value` |
 | `test_executions` | every test run: status, timestamps, full result document (`result_json`) |
 | `artifacts` | captured waveforms: metadata + `storage_path`; bytes live under `/var/lib/guppi/artifacts` |
@@ -64,5 +64,6 @@ Waveform artifacts are canonical little-endian float32 — read a capture with
 ## One rule
 
 Treat direct access as **read-only**. The hub owns writes; inserting or
-mutating rows underneath it can confuse ingest and the UI. (Deleting old data
-is fine — that's what the retention sweeper does.)
+mutating rows underneath it can confuse ingest and the UI. (Deleting old
+telemetry rows is fine — there's no automatic sweeper, so this is how you
+reclaim space; the Storage tab does the same thing through the UI.)
