@@ -78,10 +78,10 @@ cascade-deletes from the rigs table into telemetry or executions.
 - **Artifacts** (waveform captures) are pushed by the rack as raw bytes to a
   capability URL the hub mints per artifact; bytes live on disk under
   `/var/lib/guppi/artifacts`, metadata in Postgres.
-- **Retention** is a bounded window (default 7 days, `TELEMETRY_RETENTION_DAYS`):
-  the hub deletes older frames hourly, in batches, so the SD card never fills.
-  Durable data is what you explicitly record — test executions and artifacts
-  are kept.
+- **Retention**: telemetry is kept **indefinitely** — there is no automatic
+  time-based sweeper. If you need to reclaim space, prune specific channels
+  yourself from the Storage tab (a hard delete). Test executions and artifacts
+  are always kept.
 
 ## Your database is yours
 
