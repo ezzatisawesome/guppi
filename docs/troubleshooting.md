@@ -63,10 +63,12 @@ The installer is idempotent — fix the cause and re-run it. Common causes:
 
 ## Charts stop / data missing
 
-- History older than the retention window (default 7 days) is deleted by
-  design; raise `TELEMETRY_RETENTION_DAYS` in `/etc/guppi/hub.env` (then
-  restart `guppi hub` — Ctrl-C and run it again) if your SD card has room.
-- Check disk space: `df -h /var/lib/guppi`. A full disk stops ingest.
+- Telemetry is retained indefinitely — history is never auto-deleted, so
+  missing charts are not a retention issue. Check the rack is connected and
+  publishing, and that the signal path still matches.
+- Check disk space: `df -h /var/lib/guppi`. A full disk stops ingest. Because
+  history is kept indefinitely, reclaim space by pruning channels you no longer
+  need from the Storage tab.
 
 ## Ports in use
 
