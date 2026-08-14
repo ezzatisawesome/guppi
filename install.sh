@@ -381,9 +381,20 @@ if [ -d "$GUPPI_HOME/src" ]; then
   UPGRADING=1
   PREV_REF=$(cat "$GUPPI_ETC/version" 2>/dev/null || echo "unknown")
   echo "   upgrading from $PREV_REF"
-  rm -rf "$GUPPI_HOME/src.prev" "$GUPPI_HOME/ui.prev"
-  mv "$GUPPI_HOME/src" "$GUPPI_HOME/src.prev"
-  if [ -d "$GUPPI_HOME/ui" ]; then mv "$GUPPI_HOME/ui" "$GUPPI_HOME/ui.prev"; fi
+  # Recover an interrupted prior upgrade: if src.prev ALREADY exists, a previous
+  # run died between this rotate and the success cleanup (rm -rf src.prev below).
+  # Then `src` is a HALF-BUILT new tree and src.prev is the last known-good.
+  # Discard the half-build and keep src.prev as the rollback base — rotating again
+  # would overwrite the good src.prev with the broken tree (PREV_REF, read from the
+  # version file written only on success, still names the good src.prev). This is
+  # what lets a re-run of `guppi update` self-heal instead of compounding.
+  if [ -d "$GUPPI_HOME/src.prev" ]; then
+    echo "   (recovering from an interrupted previous update — keeping last good tree)"
+    rm -rf "$GUPPI_HOME/src" "$GUPPI_HOME/ui"
+  else
+    mv "$GUPPI_HOME/src" "$GUPPI_HOME/src.prev"
+    if [ -d "$GUPPI_HOME/ui" ]; then mv "$GUPPI_HOME/ui" "$GUPPI_HOME/ui.prev"; fi
+  fi
 fi
 mkdir -p "$GUPPI_HOME/src"
 tar -xzf "$TMPD/guppi-src.tar.gz" -C "$GUPPI_HOME/src" --strip-components=1
@@ -464,7 +475,12 @@ command -v uv >/dev/null 2>&1 \
 # exactly the shipped uv.lock, no resolution drift. Retry once — PyPI fetches
 # on Pi wifi flake.
 chown -R "$RUN_USER:" "$GUPPI_HOME"
-( cd "$GUPPI_HOME/src/packages/agent" \
+# rm -rf .venv before every sync: the editable install writes a .pth holding an
+# ABSOLUTE path to the package dir, and `uv sync --frozen` does NOT rewrite it if
+# a .venv already exists. A stale/half-built venv carried in by an interrupted
+# run (or a stray .venv in the tarball) would then point sys.path at the wrong
+# tree → `ModuleNotFoundError`. A fresh venv makes the .pth deterministic.
+( cd "$GUPPI_HOME/src/packages/agent" && rm -rf .venv \
   && { sudo -u "$RUN_USER" uv sync --frozen --no-dev -q \
        || { echo "   uv sync failed — retrying once"; sleep 3; sudo -u "$RUN_USER" uv sync --frozen --no-dev -q; }; } )
 
@@ -577,12 +593,18 @@ chmod 755 "$LAUNCHER"
 # Python CLI laptops pipx-install; built here from the shipped tree (frozen
 # lock, same pattern as the agent venv above) and linked onto PATH. Its
 # `hub`/`rack` subcommands exec the co-installed launchers.
-( cd "$GUPPI_HOME/src/packages/cli" \
+( cd "$GUPPI_HOME/src/packages/cli" && rm -rf .venv \
   && { sudo -u "$RUN_USER" uv sync --frozen --no-dev -q \
        || { echo "   uv sync (cli) failed — retrying once"; sleep 3; sudo -u "$RUN_USER" uv sync --frozen --no-dev -q; }; } )
 "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi" --help >/dev/null \
   || fail "guppi CLI built but doesn't run — re-run the installer."
 ln -sf "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi" /usr/local/bin/guppi
+# Verify the binary users actually invoke — the one on PATH — not just the venv
+# path above. A stale /usr/local/bin/guppi pointing at a previous, now-deleted
+# venv would pass the check above yet fail for the user as
+# `ModuleNotFoundError: No module named 'guppi_cli'`. This catches that.
+/usr/local/bin/guppi --help >/dev/null \
+  || fail "/usr/local/bin/guppi doesn't run after install (stale symlink or unimportable guppi_cli) — re-run the installer."
 
 # Verify before claiming success: start the hub as the operator, wait for it
 # to answer, stop it. A failed upgrade rolls back to the previous tree.
@@ -624,6 +646,13 @@ if ! smoke_hub "$TMPD/hub-smoke.log"; then
     if [ -d "$GUPPI_HOME/ui.prev" ]; then
       rm -rf "$GUPPI_HOME/ui"; mv "$GUPPI_HOME/ui.prev" "$GUPPI_HOME/ui"
     fi
+    # The forward path repointed /usr/local/bin/guppi at the NEW cli venv, which
+    # we just deleted. Repoint it at the restored tree's cli venv and reverify —
+    # the hub smoke below exercises only the agent venv, never the CLI, so a
+    # rolled-back box could otherwise leave `guppi` dangling → ModuleNotFoundError.
+    ln -sf "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi" /usr/local/bin/guppi
+    /usr/local/bin/guppi --help >/dev/null \
+      || echo "✗ guppi CLI didn't run after rollback — re-run the installer" >&2
     smoke_hub "$TMPD/hub-rollback.log" \
       && echo "✓ Rollback verified — $PREV_REF starts. Run: guppi hub" >&2 \
       || echo "✗ Rollback didn't start either — log: $GUPPI_ETC (re-run installer)" >&2
@@ -654,6 +683,16 @@ echo ""
 echo "  NOTE: nothing auto-starts on boot — after a reboot, run guppi hub again."
 if [ "$UPGRADING" = 1 ] && [ -x /usr/local/bin/guppi-rack ]; then
   echo ""
-  echo "  NOTE: the source tree was replaced and the rack venv with it —"
-  echo "        re-run:  sudo bash /opt/guppi/src/packages/rack/install.sh"
+  if [ "${GUPPI_UPDATE:-0}" = 1 ]; then
+    # `guppi update` runs the rack installer next in the same run — the rack venv
+    # (which lived in the tree we just replaced) is about to be rebuilt. Say so
+    # rather than telling the operator to do it themselves.
+    echo "  NOTE: the tree was replaced — rebuilding the rack against it next…"
+  else
+    # Standalone `install.sh` (hub only): the rack venv is now dangling. Point at
+    # the one command that rebuilds BOTH in the right order and self-heals.
+    echo "  NOTE: the source tree was replaced and the rack venv with it."
+    echo "        Rebuild both with:  guppi update"
+    echo "        (or just the rack:  sudo bash /opt/guppi/src/packages/rack/install.sh)"
+  fi
 fi
