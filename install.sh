@@ -61,6 +61,13 @@ trap 'echo ""; echo "✗ Install failed at line $LINENO (see the message above).
       echo "  Re-running the installer is safe — it picks up where it left off." >&2' ERR
 
 [ "$(id -u)" -eq 0 ] || fail "Run as root:  curl ... | sudo bash"
+# Resolve our own directory BEFORE `cd /` — when invoked as `bash scripts/install.sh`
+# (dev/CI), BASH_SOURCE is a relative path that only resolves against the original
+# cwd. Doing this after the cd would silently yield an empty SELF_DIR, so the rack
+# handoff below never finds the sibling tree (forces a fetch on install, hard-fails
+# on uninstall). A curl|bash pipe has no real path here → SELF_DIR stays empty, which
+# correctly falls through to the fetch path.
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-/nonexistent}")" 2>/dev/null && pwd || true)
 cd /   # sudo -u postgres commands warn if cwd is unreadable (e.g. /root)
 
 REPO="ezzatisawesome/guppi"
@@ -116,7 +123,7 @@ if [ "$COMPONENT" = rack ]; then
   # `curl | bash -s -- rack` update must fetch the pinned release below, not
   # re-exec whatever stale copy is already installed (which silently pins the box
   # to its current version). Air-gapped reuse still works via GUPPI_SRC_TARBALL.
-  SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-/nonexistent}")" 2>/dev/null && pwd || true)
+  # SELF_DIR was resolved at the top, before `cd /` (see there for why).
   for RACK_SH in ${SELF_DIR:+"$SELF_DIR/../packages/rack/install.sh"}; do
     if [ -f "$RACK_SH" ]; then exec bash "$RACK_SH" "$@"; fi
   done
@@ -159,12 +166,14 @@ if [ "${1:-}" = "--uninstall" ] || [ "${GUPPI_UNINSTALL:-0}" = "1" ]; then
         /etc/systemd/journald.conf.d/guppi.conf
   systemctl daemon-reload
   rm -f "$LAUNCHER"
-  # /usr/local/bin/guppi symlinks into /opt/guppi's cli venv — remove it with
-  # the tree (never a pipx/pip-installed CLI, which lives elsewhere).
-  { [ -L /usr/local/bin/guppi ] \
-      && case "$(readlink /usr/local/bin/guppi)" in
-           "$GUPPI_HOME"/*) rm -f /usr/local/bin/guppi ;;
-         esac; } || true
+  # /usr/local/bin/guppi is our bench wrapper (older installs: a symlink into
+  # /opt/guppi's cli venv). Remove either — but never a pipx/pip-installed CLI,
+  # which lives elsewhere, carries no wrapper marker, and points outside GUPPI_HOME.
+  if [ -f /usr/local/bin/guppi ] && grep -q 'guppi-bench-wrapper' /usr/local/bin/guppi 2>/dev/null; then
+    rm -f /usr/local/bin/guppi
+  elif [ -L /usr/local/bin/guppi ]; then
+    case "$(readlink /usr/local/bin/guppi)" in "$GUPPI_HOME"/*) rm -f /usr/local/bin/guppi ;; esac
+  fi
   rm -rf "$GUPPI_HOME" "$GUPPI_ETC"
   rm -f /usr/local/bin/nats-server /usr/local/bin/postgrest
   if [ "${GUPPI_PURGE_DATA:-0}" = "1" ]; then
@@ -269,6 +278,40 @@ hub_answers() {
   local code
   code=$(curl -m 2 -so /dev/null -w '%{http_code}' http://localhost:8000/ 2>/dev/null || true)
   [ -n "$code" ] && [ "$code" != "000" ]
+}
+
+# Install /usr/local/bin/guppi as a resilient wrapper rather than a bare symlink
+# into the venv. A symlink that points at a missing venv (mid-upgrade, a
+# half-built sync, a prior install that couldn't clean it) leaves the operator
+# with a bare `command not found` and no way to run `guppi update` to repair it.
+# The wrapper execs the real CLI when the venv is built, and otherwise still
+# dispatches `guppi hub`/`guppi rack` to the co-installed launchers and tells the
+# operator how to rebuild everything else. CLI_BIN is an absolute path, so the
+# wrapper never needs repointing across tree swaps or rollbacks.
+write_guppi_wrapper() {
+  local cli_bin="${1:-/opt/guppi/src/packages/cli/.venv/bin/guppi}"
+  { echo '#!/usr/bin/env bash'
+    echo '# guppi-bench-wrapper — front door to the CLI. Execs the Python CLI in the'
+    echo '# source-tree venv when it is built; degrades gracefully when it is not.'
+    echo "CLI_BIN=$cli_bin"
+    cat <<'GUPPI_WRAP'
+if [ -x "$CLI_BIN" ]; then exec "$CLI_BIN" "$@"; fi
+cmd="${1:-}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  hub)
+    if [ -x /usr/local/bin/guppi-hub ];  then exec /usr/local/bin/guppi-hub  "$@"; fi
+    echo "guppi: no hub installed on this box." >&2; exit 127 ;;
+  rack)
+    if [ -x /usr/local/bin/guppi-rack ]; then exec /usr/local/bin/guppi-rack "$@"; fi
+    echo "guppi: no rack installed on this box." >&2; exit 127 ;;
+  *)
+    echo "guppi: the CLI isn't built ($CLI_BIN is missing)." >&2
+    echo "Repair it:  curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash" >&2
+    exit 127 ;;
+esac
+GUPPI_WRAP
+  } >/usr/local/bin/guppi
+  chmod 755 /usr/local/bin/guppi
 }
 
 # apt on a freshly booted Pi: unattended-upgrades often holds the dpkg lock
@@ -591,14 +634,14 @@ chmod 755 "$LAUNCHER"
 # ── the `guppi` CLI ──────────────────────────────────────────────────────────
 # One real `guppi` on every machine — no dispatcher shim. This is the same
 # Python CLI laptops pipx-install; built here from the shipped tree (frozen
-# lock, same pattern as the agent venv above) and linked onto PATH. Its
+# lock, same pattern as the agent venv above) and put onto PATH. Its
 # `hub`/`rack` subcommands exec the co-installed launchers.
 ( cd "$GUPPI_HOME/src/packages/cli" && rm -rf .venv \
   && { sudo -u "$RUN_USER" uv sync --frozen --no-dev -q \
        || { echo "   uv sync (cli) failed — retrying once"; sleep 3; sudo -u "$RUN_USER" uv sync --frozen --no-dev -q; }; } )
 "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi" --help >/dev/null \
   || fail "guppi CLI built but doesn't run — re-run the installer."
-ln -sf "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi" /usr/local/bin/guppi
+write_guppi_wrapper "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi"
 # Verify the binary users actually invoke — the one on PATH — not just the venv
 # path above. A stale /usr/local/bin/guppi pointing at a previous, now-deleted
 # venv would pass the check above yet fail for the user as
@@ -646,11 +689,11 @@ if ! smoke_hub "$TMPD/hub-smoke.log"; then
     if [ -d "$GUPPI_HOME/ui.prev" ]; then
       rm -rf "$GUPPI_HOME/ui"; mv "$GUPPI_HOME/ui.prev" "$GUPPI_HOME/ui"
     fi
-    # The forward path repointed /usr/local/bin/guppi at the NEW cli venv, which
-    # we just deleted. Repoint it at the restored tree's cli venv and reverify —
-    # the hub smoke below exercises only the agent venv, never the CLI, so a
-    # rolled-back box could otherwise leave `guppi` dangling → ModuleNotFoundError.
-    ln -sf "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi" /usr/local/bin/guppi
+    # Rewrite the wrapper (harmless — it's absolute-pathed and tree-independent)
+    # and reverify against the restored tree's cli venv. The hub smoke below
+    # exercises only the agent venv, never the CLI, so a rolled-back box could
+    # otherwise leave `guppi` broken → ModuleNotFoundError.
+    write_guppi_wrapper "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi"
     /usr/local/bin/guppi --help >/dev/null \
       || echo "✗ guppi CLI didn't run after rollback — re-run the installer" >&2
     smoke_hub "$TMPD/hub-rollback.log" \
