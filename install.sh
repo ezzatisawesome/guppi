@@ -290,6 +290,15 @@ hub_answers() {
 # wrapper never needs repointing across tree swaps or rollbacks.
 write_guppi_wrapper() {
   local cli_bin="${1:-/opt/guppi/src/packages/cli/.venv/bin/guppi}"
+  # Write to a fresh temp path, then atomically mv into place. NEVER redirect
+  # straight onto /usr/local/bin/guppi: on boxes where it is a legacy SYMLINK
+  # into the cli venv (older installs symlinked instead of wrapping), a bare `>`
+  # FOLLOWS the symlink and writes this wrapper straight into .venv/bin/guppi —
+  # clobbering the real Python entrypoint uv sync just built, so CLI_BIN ends up
+  # pointing at a copy of the wrapper (self-exec loop). rm -f the temp first so
+  # `>` can't follow a stale symlink there either; mv -f replaces the symlink at
+  # the destination with a regular file.
+  rm -f /usr/local/bin/guppi.tmp
   { echo '#!/usr/bin/env bash'
     echo '# guppi-bench-wrapper — front door to the CLI. Execs the Python CLI in the'
     echo '# source-tree venv when it is built; degrades gracefully when it is not.'
@@ -320,8 +329,9 @@ case "$cmd" in
     exit 127 ;;
 esac
 GUPPI_WRAP
-  } >/usr/local/bin/guppi
-  chmod 755 /usr/local/bin/guppi
+  } >/usr/local/bin/guppi.tmp
+  chmod 755 /usr/local/bin/guppi.tmp
+  mv -f /usr/local/bin/guppi.tmp /usr/local/bin/guppi
 }
 
 # apt on a freshly booted Pi: unattended-upgrades often holds the dpkg lock
@@ -646,9 +656,13 @@ chmod 755 "$LAUNCHER"
 # Python CLI laptops pipx-install; built here from the shipped tree (frozen
 # lock, same pattern as the agent venv above) and put onto PATH. Its
 # `hub`/`rack` subcommands exec the co-installed launchers.
+# A failed `uv sync` here must be FATAL: without `|| fail` the subshell's
+# non-zero exit is swallowed and the install limps forward on a half-built (or
+# absent) venv, only to trip an obscure wrapper error later.
 ( cd "$GUPPI_HOME/src/packages/cli" && rm -rf .venv \
   && { sudo -u "$RUN_USER" uv sync --frozen --no-dev -q \
-       || { echo "   uv sync (cli) failed — retrying once"; sleep 3; sudo -u "$RUN_USER" uv sync --frozen --no-dev -q; }; } )
+       || { echo "   uv sync (cli) failed — retrying once"; sleep 3; sudo -u "$RUN_USER" uv sync --frozen --no-dev -q; }; } ) \
+  || fail "building the guppi CLI venv (uv sync) failed — re-run the installer."
 "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi" --help >/dev/null \
   || fail "guppi CLI built but doesn't run — re-run the installer."
 write_guppi_wrapper "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi"
