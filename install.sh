@@ -295,7 +295,17 @@ write_guppi_wrapper() {
     echo '# source-tree venv when it is built; degrades gracefully when it is not.'
     echo "CLI_BIN=$cli_bin"
     cat <<'GUPPI_WRAP'
-if [ -x "$CLI_BIN" ]; then exec "$CLI_BIN" "$@"; fi
+# Self-exec guard. A broken install can leave CLI_BIN pointing at a copy of
+# THIS wrapper (a killed `uv sync` once left the venv entrypoint as the wrapper
+# itself) — `exec "$CLI_BIN"` would then re-enter here and spin at 100% CPU
+# forever, printing nothing. Refuse to exec a target that resolves to our own
+# path; fall through to the repair message instead of hanging the box.
+__self=$(readlink -f "$0" 2>/dev/null || echo "$0")
+__target=$(readlink -f "$CLI_BIN" 2>/dev/null || echo "$CLI_BIN")
+if [ -x "$CLI_BIN" ] && [ "$__target" != "$__self" ]; then exec "$CLI_BIN" "$@"; fi
+if [ "$__target" = "$__self" ]; then
+  echo "guppi: CLI venv is broken (entrypoint points back at this wrapper)." >&2
+fi
 cmd="${1:-}"; [ $# -gt 0 ] && shift
 case "$cmd" in
   hub)
