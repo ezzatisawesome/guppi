@@ -341,7 +341,14 @@ APT="apt-get -o DPkg::Lock::Timeout=180 -qq"
 echo "── [1/7] System packages (PostgreSQL >= 15, curl, tar) ──"
 export DEBIAN_FRONTEND=noninteractive
 $APT update || echo "   WARNING: apt-get update reported errors — continuing with cached package lists"
-$APT install -y curl ca-certificates tar xz-utils postgresql postgresql-client >/dev/null
+$APT install -y curl ca-certificates tar xz-utils >/dev/null
+# Install postgresql-common (it provides pg_lsclusters) BEFORE the postgresql
+# metapackage. apt preconfigures every package in one `install` up front, and
+# the postgresql metapackage's debconf .config calls pg_lsclusters — which
+# isn't on PATH yet if postgresql-common is being unpacked in the same batch
+# (harmless but prints "pg_lsclusters: not found"). Splitting the calls fixes it.
+$APT install -y postgresql-common postgresql-client-common >/dev/null
+$APT install -y postgresql postgresql-client >/dev/null
 
 # Distro PostgreSQL too old (Ubuntu 22.04 ships 14, bullseye 13)? Add the
 # official pgdg repo via the helper postgresql-common ships, install current.
@@ -533,6 +540,23 @@ command -v uv >/dev/null 2>&1 \
   || { fetch https://astral.sh/uv/install.sh -o "$TMPD/uv-install.sh" \
        && env UV_INSTALL_DIR=/usr/local/bin sh "$TMPD/uv-install.sh" >/dev/null; } \
   || fail "Couldn't install uv"
+
+# sync_venv: build a package dir's venv AS $RUN_USER, self-healing a poisoned
+# cache. `uv sync` can fail (flaky PyPI) or — worse — succeed yet hardlink a
+# partially-written wheel out of uv's per-user cache, leaving an unimportable
+# venv. On failure we purge that cache and rebuild once. Callers `rm -rf .venv`
+# AS ROOT first: a prior root-run venv can hold root-owned __pycache__ that
+# $RUN_USER can't unlink, and syncing over it leaves stale bytecode behind.
+# Every venv is also VERIFIED as $RUN_USER (never root) so we never write
+# root-owned bytecode into a user-owned tree in the first place.
+sync_venv() {  # $1=dir
+  local dir="$1"
+  ( cd "$dir" && sudo -u "$RUN_USER" uv sync --frozen --no-dev -q ) && return 0
+  echo "   uv sync failed — clearing the uv cache and rebuilding once"
+  sudo -u "$RUN_USER" uv cache clean >/dev/null 2>&1 || true
+  rm -rf "$dir/.venv"
+  ( cd "$dir" && sudo -u "$RUN_USER" uv sync --frozen --no-dev -q )
+}
 # The tarball was extracted as root; uv sync (and the .venv it creates) run as
 # $RUN_USER, so the tree must be theirs before syncing. --frozen: install
 # exactly the shipped uv.lock, no resolution drift. Retry once — PyPI fetches
@@ -543,9 +567,9 @@ chown -R "$RUN_USER:" "$GUPPI_HOME"
 # a .venv already exists. A stale/half-built venv carried in by an interrupted
 # run (or a stray .venv in the tarball) would then point sys.path at the wrong
 # tree → `ModuleNotFoundError`. A fresh venv makes the .pth deterministic.
-( cd "$GUPPI_HOME/src/packages/agent" && rm -rf .venv \
-  && { sudo -u "$RUN_USER" uv sync --frozen --no-dev -q \
-       || { echo "   uv sync failed — retrying once"; sleep 3; sudo -u "$RUN_USER" uv sync --frozen --no-dev -q; }; } )
+rm -rf "$GUPPI_HOME/src/packages/agent/.venv"
+sync_venv "$GUPPI_HOME/src/packages/agent" \
+  || fail "building the hub/agent venv (uv sync) failed — re-run the installer."
 
 # Values are QUOTED: guppi-hub sources this file in bash, and the DSN's '&'
 # would otherwise background half the line.
@@ -659,18 +683,30 @@ chmod 755 "$LAUNCHER"
 # A failed `uv sync` here must be FATAL: without `|| fail` the subshell's
 # non-zero exit is swallowed and the install limps forward on a half-built (or
 # absent) venv, only to trip an obscure wrapper error later.
-( cd "$GUPPI_HOME/src/packages/cli" && rm -rf .venv \
-  && { sudo -u "$RUN_USER" uv sync --frozen --no-dev -q \
-       || { echo "   uv sync (cli) failed — retrying once"; sleep 3; sudo -u "$RUN_USER" uv sync --frozen --no-dev -q; }; } ) \
+CLI_DIR="$GUPPI_HOME/src/packages/cli"
+rm -rf "$CLI_DIR/.venv"   # AS ROOT — clears any root-owned __pycache__ a prior run left
+sync_venv "$CLI_DIR" \
   || fail "building the guppi CLI venv (uv sync) failed — re-run the installer."
-"$GUPPI_HOME/src/packages/cli/.venv/bin/guppi" --help >/dev/null \
-  || fail "guppi CLI built but doesn't run — re-run the installer."
-write_guppi_wrapper "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi"
+# Verify AS $RUN_USER (never root — see sync_venv). `uv sync` can succeed yet
+# leave an unimportable venv when a poisoned cache hardlinks a partial wheel in
+# (e.g. `import idna` dies with "No module named 'idna.package_data'"). sync_venv
+# already purges+rebuilds on a sync *failure*; here we also cover a sync that
+# "succeeds" but won't import — purge the cache and rebuild once.
+if ! sudo -u "$RUN_USER" "$CLI_DIR/.venv/bin/guppi" --help >/dev/null 2>&1; then
+  echo "   CLI venv built but won't import — clearing the uv cache and rebuilding once"
+  sudo -u "$RUN_USER" uv cache clean >/dev/null 2>&1 || true
+  rm -rf "$CLI_DIR/.venv"
+  sync_venv "$CLI_DIR" \
+    && sudo -u "$RUN_USER" "$CLI_DIR/.venv/bin/guppi" --help >/dev/null 2>&1 \
+    || fail "guppi CLI doesn't run even after a clean rebuild — re-run the installer."
+fi
+write_guppi_wrapper "$CLI_DIR/.venv/bin/guppi"
 # Verify the binary users actually invoke — the one on PATH — not just the venv
 # path above. A stale /usr/local/bin/guppi pointing at a previous, now-deleted
 # venv would pass the check above yet fail for the user as
-# `ModuleNotFoundError: No module named 'guppi_cli'`. This catches that.
-/usr/local/bin/guppi --help >/dev/null \
+# `ModuleNotFoundError: No module named 'guppi_cli'`. This catches that. Again
+# AS $RUN_USER so the verify never writes root-owned bytecode into the venv.
+sudo -u "$RUN_USER" /usr/local/bin/guppi --help >/dev/null \
   || fail "/usr/local/bin/guppi doesn't run after install (stale symlink or unimportable guppi_cli) — re-run the installer."
 
 # Verify before claiming success: start the hub as the operator, wait for it
@@ -718,7 +754,7 @@ if ! smoke_hub "$TMPD/hub-smoke.log"; then
     # exercises only the agent venv, never the CLI, so a rolled-back box could
     # otherwise leave `guppi` broken → ModuleNotFoundError.
     write_guppi_wrapper "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi"
-    /usr/local/bin/guppi --help >/dev/null \
+    sudo -u "$RUN_USER" /usr/local/bin/guppi --help >/dev/null \
       || echo "✗ guppi CLI didn't run after rollback — re-run the installer" >&2
     smoke_hub "$TMPD/hub-rollback.log" \
       && echo "✓ Rollback verified — $PREV_REF starts. Run: guppi hub" >&2 \
