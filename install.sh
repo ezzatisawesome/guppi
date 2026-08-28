@@ -233,7 +233,13 @@ flock -n 9 || fail "Another guppi installer is already running."
 # Downloads land in a private temp dir (no fixed /tmp names — no collisions,
 # no symlink games) that's removed on any exit.
 TMPD=$(mktemp -d /tmp/guppi-install.XXXXXX)
-trap 'rm -rf "$TMPD"' EXIT
+# Reap the background download job (launched in [1/7]) BEFORE removing TMPD: a
+# foreground failure in the concurrent window — the whole PostgreSQL install
+# between the bg launch and the `wait` in [3/7] — would otherwise fire this trap
+# and rm -rf TMPD out from under a still-running curl, orphaning it (reparented
+# to init, writing into a deleted path). kill+wait first, then clean up. Both are
+# no-ops once [3/7] has already waited, and no-ops when DOWNLOADS_PID is unset.
+trap 'if [ -n "${DOWNLOADS_PID:-}" ]; then kill "$DOWNLOADS_PID" 2>/dev/null || true; wait "$DOWNLOADS_PID" 2>/dev/null || true; fi; rm -rf "$TMPD"' EXIT
 
 # All downloads retry; fetch to a FILE, never pipe into tar — a mid-stream
 # hiccup inside a pipe under pipefail kills the whole script with no retry.
@@ -269,6 +275,50 @@ verify_asset() {
   (cd "$TMPD" && grep " $name\$" SHA256SUMS | sha256sum -c - >/dev/null) \
     || fail "$name failed checksum verification against $GUPPI_REF's SHA256SUMS"
   echo "   $name: checksum OK"
+}
+
+# Fetch every release asset we need into $TMPD, ready for the foreground steps
+# to verify + extract. Launched as a BACKGROUND job in [1/7] so the (network-
+# bound) pulls overlap the PostgreSQL apt install + cluster bring-up, which need
+# none of them; [3/7]/[4/7]/[5/7] `wait` on it, then verify + extract. Reads
+# GUPPI_REF/$DL/arch vars set before it's launched. Its own errexit trap is
+# cleared so a failed fetch surfaces cleanly at the `wait` (as our explicit
+# message) instead of also firing the generic line-trap from inside the subshell.
+stage_downloads() {
+  trap - ERR
+  if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
+    cp "$GUPPI_SRC_TARBALL" "$TMPD/guppi-src.tar.gz"
+  else
+    fetch -o "$TMPD/SHA256SUMS" "$DL/SHA256SUMS" 2>/dev/null || true
+    fetch -o "$TMPD/guppi-src.tar.gz" "$DL/guppi-src.tar.gz" \
+      || fail "No guppi-src.tar.gz asset on release $GUPPI_REF"
+    # UI bundle is best-effort (the hub can run API-only). A local override is
+    # extracted straight from its path in [4/7], so skip the download then.
+    if [ -z "${GUPPI_UI_TARBALL:-}" ]; then
+      fetch -o "$TMPD/guppi-ui-local.tar.gz" "$DL/guppi-ui-local.tar.gz" 2>/dev/null \
+        || rm -f "$TMPD/guppi-ui-local.tar.gz"
+    fi
+  fi
+  # Broker + read-layer binaries (from their own repos, so staged even for an
+  # air-gapped src tarball) — only if not already on PATH. [5/7] extracts these.
+  if ! command -v nats-server >/dev/null 2>&1; then
+    local nats_ver
+    nats_ver=$(latest_tag nats-io/nats-server v2.14.3)
+    fetch -o "$TMPD/nats.tar.gz" \
+      "https://github.com/nats-io/nats-server/releases/download/$nats_ver/nats-server-$nats_ver-linux-$NATS_ARCH.tar.gz" \
+      || fail "Couldn't download nats-server $nats_ver"
+  fi
+  if ! command -v postgrest >/dev/null 2>&1; then
+    local pgrst_ver ok="" arch
+    pgrst_ver=$(latest_tag PostgREST/postgrest v14.15)
+    for arch in $PGRST_ARCHES; do
+      if fetch -o "$TMPD/postgrest.tar.xz" \
+        "https://github.com/PostgREST/postgrest/releases/download/$pgrst_ver/postgrest-$pgrst_ver-$arch.tar.xz"; then
+        ok=1; break
+      fi
+    done
+    [ -n "$ok" ] || fail "Couldn't download PostgREST $pgrst_ver (tried: $PGRST_ARCHES)"
+  fi
 }
 
 # Whether something is already answering on the hub port. -m bounds the probe:
@@ -342,6 +392,21 @@ echo "── [1/7] System packages (PostgreSQL >= 15, curl, tar) ──"
 export DEBIAN_FRONTEND=noninteractive
 $APT update || echo "   WARNING: apt-get update reported errors — continuing with cached package lists"
 $APT install -y curl ca-certificates tar xz-utils >/dev/null
+
+# Resolve the release ref and start pulling release assets in the BACKGROUND now
+# (curl/tar are in place), so the downloads overlap the PostgreSQL install +
+# cluster bring-up below — they need nothing from PostgreSQL. [3/7] waits on this
+# before extracting. Air-gapped installs (GUPPI_SRC_TARBALL) stage here too, so
+# the same wait/extract path runs regardless of source.
+if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
+  GUPPI_REF="${GUPPI_REF:-local}"
+elif [ -z "$GUPPI_REF" ]; then
+  GUPPI_REF=$(latest_tag "$REPO" || true)
+  [ -n "$GUPPI_REF" ] || fail "No public release found on $REPO — set GUPPI_REF to a tag (GitHub API may be rate-limited; retry in a few minutes)"
+fi
+DL="https://github.com/$REPO/releases/download/$GUPPI_REF"
+stage_downloads & DOWNLOADS_PID=$!
+
 # Install postgresql-common (it provides pg_lsclusters) BEFORE the postgresql
 # metapackage. apt preconfigures every package in one `install` up front, and
 # the postgresql metapackage's debconf .config calls pg_lsclusters — which
@@ -408,23 +473,16 @@ chown -R "$RUN_USER:" "$GUPPI_DATA"
 echo "── [3/7] Fetch guppi source (${GUPPI_REF:-latest release}) ──"
 # Everything installs from PUBLIC release assets on github.com/$REPO — no
 # account, no token, no clone. guppi-src.tar.gz is the public source subset
-# (hub + rack), built and attached by the release workflow.
+# (hub + rack), built and attached by the release workflow. The pulls were
+# kicked off in [1/7]; wait for them, then verify + extract.
+wait "$DOWNLOADS_PID" \
+  || fail "downloading release assets failed — re-run the installer (GitHub API may be rate-limited; retry in a few minutes)."
 if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
-  # Air-gapped / CI path: a local tarball replaces the download.
-  GUPPI_REF="${GUPPI_REF:-local}"
   echo "   using local tarball: $GUPPI_SRC_TARBALL"
-  cp "$GUPPI_SRC_TARBALL" "$TMPD/guppi-src.tar.gz"
 else
-  if [ -z "$GUPPI_REF" ]; then
-    GUPPI_REF=$(latest_tag "$REPO" || true)
-    [ -n "$GUPPI_REF" ] || fail "No public release found on $REPO — set GUPPI_REF to a tag (GitHub API may be rate-limited; retry in a few minutes)"
-  fi
   echo "   ref: $GUPPI_REF"
-  DL="https://github.com/$REPO/releases/download/$GUPPI_REF"
-  fetch -o "$TMPD/SHA256SUMS" "$DL/SHA256SUMS" 2>/dev/null \
+  [ -f "$TMPD/SHA256SUMS" ] \
     || echo "   NOTE: no SHA256SUMS on $GUPPI_REF (pre-checksum release) — skipping verification"
-  fetch -o "$TMPD/guppi-src.tar.gz" "$DL/guppi-src.tar.gz" \
-    || fail "No guppi-src.tar.gz asset on release $GUPPI_REF"
   verify_asset guppi-src.tar.gz
 fi
 
@@ -474,8 +532,7 @@ rm -rf "$GUPPI_HOME/ui"; mkdir -p "$GUPPI_HOME/ui"
 if [ -n "${GUPPI_UI_TARBALL:-}" ]; then
   tar -xzf "$GUPPI_UI_TARBALL" -C "$GUPPI_HOME/ui"
   echo "   installed from local tarball"
-elif [ -z "${GUPPI_SRC_TARBALL:-}" ] \
-     && fetch -o "$TMPD/guppi-ui-local.tar.gz" "$DL/guppi-ui-local.tar.gz" 2>/dev/null; then
+elif [ -f "$TMPD/guppi-ui-local.tar.gz" ]; then
   verify_asset guppi-ui-local.tar.gz
   tar -xzf "$TMPD/guppi-ui-local.tar.gz" -C "$GUPPI_HOME/ui"
   echo "   installed from release asset"
@@ -486,24 +543,16 @@ else
 fi
 
 echo "── [5/7] nats-server + PostgREST binaries ──"
+# Both were staged in [1/7] (when absent from PATH); extract + install them here
+# as root. The command -v guards match stage_downloads, so a pre-installed
+# binary means nothing was staged and nothing is done.
 if ! command -v nats-server >/dev/null 2>&1; then
-  NATS_VER=$(latest_tag nats-io/nats-server v2.14.3)
-  fetch -o "$TMPD/nats.tar.gz" \
-    "https://github.com/nats-io/nats-server/releases/download/$NATS_VER/nats-server-$NATS_VER-linux-$NATS_ARCH.tar.gz" \
-    || fail "Couldn't download nats-server $NATS_VER"
+  [ -f "$TMPD/nats.tar.gz" ] || fail "nats-server wasn't staged — re-run the installer."
   tar -xzf "$TMPD/nats.tar.gz" -C "$TMPD"
   install -m755 "$TMPD"/nats-server-*/nats-server /usr/local/bin/nats-server
 fi
 if ! command -v postgrest >/dev/null 2>&1; then
-  PGRST_VER=$(latest_tag PostgREST/postgrest v14.15)
-  PGRST_OK=""
-  for PGRST_ARCH in $PGRST_ARCHES; do
-    if fetch -o "$TMPD/postgrest.tar.xz" \
-      "https://github.com/PostgREST/postgrest/releases/download/$PGRST_VER/postgrest-$PGRST_VER-$PGRST_ARCH.tar.xz"; then
-      PGRST_OK=1; break
-    fi
-  done
-  [ -n "$PGRST_OK" ] || fail "Couldn't download PostgREST $PGRST_VER (tried: $PGRST_ARCHES)"
+  [ -f "$TMPD/postgrest.tar.xz" ] || fail "PostgREST wasn't staged — re-run the installer."
   tar -xJf "$TMPD/postgrest.tar.xz" -C /usr/local/bin postgrest
 fi
 
@@ -557,19 +606,35 @@ sync_venv() {  # $1=dir
   rm -rf "$dir/.venv"
   ( cd "$dir" && sudo -u "$RUN_USER" uv sync --frozen --no-dev -q )
 }
+
+# build_venv: (re)build a package dir's venv and prove it imports. rm -rf .venv
+# FIRST (AS ROOT — a prior root-run venv holds root-owned __pycache__ $RUN_USER
+# can't unlink; and `uv sync --frozen` won't rewrite a stale editable .pth that
+# points sys.path at the wrong tree, carried in by an interrupted run or a stray
+# .venv in the tarball → `ModuleNotFoundError`). sync_venv self-heals a flaky
+# or poisoned-cache sync. Then VERIFY AS $RUN_USER (never root, so we never write
+# root-owned bytecode into a user tree): a sync can "succeed" yet hardlink a
+# partial wheel out of the cache, leaving an unimportable venv (e.g. `import idna`
+# → "No module named 'idna.package_data'") — purge the cache and rebuild once if
+# the import check fails.
+build_venv() {  # $1=dir  $2=verify-cmd (run in $dir as $RUN_USER)  $3=label
+  local dir="$1" verify="$2" label="$3"
+  rm -rf "$dir/.venv"
+  sync_venv "$dir" || fail "building the $label venv (uv sync) failed — re-run the installer."
+  if [ -n "$verify" ] && ! ( cd "$dir" && sudo -u "$RUN_USER" bash -c "$verify" ) >/dev/null 2>&1; then
+    echo "   $label venv built but won't import — clearing the uv cache and rebuilding once"
+    sudo -u "$RUN_USER" uv cache clean >/dev/null 2>&1 || true
+    rm -rf "$dir/.venv"
+    sync_venv "$dir" \
+      && ( cd "$dir" && sudo -u "$RUN_USER" bash -c "$verify" ) >/dev/null 2>&1 \
+      || fail "$label venv doesn't run even after a clean rebuild — re-run the installer."
+  fi
+}
 # The tarball was extracted as root; uv sync (and the .venv it creates) run as
-# $RUN_USER, so the tree must be theirs before syncing. --frozen: install
-# exactly the shipped uv.lock, no resolution drift. Retry once — PyPI fetches
-# on Pi wifi flake.
+# $RUN_USER, so the tree must be theirs before syncing.
 chown -R "$RUN_USER:" "$GUPPI_HOME"
-# rm -rf .venv before every sync: the editable install writes a .pth holding an
-# ABSOLUTE path to the package dir, and `uv sync --frozen` does NOT rewrite it if
-# a .venv already exists. A stale/half-built venv carried in by an interrupted
-# run (or a stray .venv in the tarball) would then point sys.path at the wrong
-# tree → `ModuleNotFoundError`. A fresh venv makes the .pth deterministic.
-rm -rf "$GUPPI_HOME/src/packages/agent/.venv"
-sync_venv "$GUPPI_HOME/src/packages/agent" \
-  || fail "building the hub/agent venv (uv sync) failed — re-run the installer."
+build_venv "$GUPPI_HOME/src/packages/agent" \
+  '.venv/bin/python -c "import fastapi, uvicorn, asyncpg, openhtf"' "hub/agent"
 
 # Values are QUOTED: guppi-hub sources this file in bash, and the DSN's '&'
 # would otherwise background half the line.
@@ -678,28 +743,11 @@ chmod 755 "$LAUNCHER"
 # ── the `guppi` CLI ──────────────────────────────────────────────────────────
 # One real `guppi` on every machine — no dispatcher shim. This is the same
 # Python CLI laptops pipx-install; built here from the shipped tree (frozen
-# lock, same pattern as the agent venv above) and put onto PATH. Its
-# `hub`/`rack` subcommands exec the co-installed launchers.
-# A failed `uv sync` here must be FATAL: without `|| fail` the subshell's
-# non-zero exit is swallowed and the install limps forward on a half-built (or
-# absent) venv, only to trip an obscure wrapper error later.
+# lock, same build_venv path as the agent venv above — including its import
+# verify + cache-purge-rebuild-once) and put onto PATH. Its `hub`/`rack`
+# subcommands exec the co-installed launchers.
 CLI_DIR="$GUPPI_HOME/src/packages/cli"
-rm -rf "$CLI_DIR/.venv"   # AS ROOT — clears any root-owned __pycache__ a prior run left
-sync_venv "$CLI_DIR" \
-  || fail "building the guppi CLI venv (uv sync) failed — re-run the installer."
-# Verify AS $RUN_USER (never root — see sync_venv). `uv sync` can succeed yet
-# leave an unimportable venv when a poisoned cache hardlinks a partial wheel in
-# (e.g. `import idna` dies with "No module named 'idna.package_data'"). sync_venv
-# already purges+rebuilds on a sync *failure*; here we also cover a sync that
-# "succeeds" but won't import — purge the cache and rebuild once.
-if ! sudo -u "$RUN_USER" "$CLI_DIR/.venv/bin/guppi" --help >/dev/null 2>&1; then
-  echo "   CLI venv built but won't import — clearing the uv cache and rebuilding once"
-  sudo -u "$RUN_USER" uv cache clean >/dev/null 2>&1 || true
-  rm -rf "$CLI_DIR/.venv"
-  sync_venv "$CLI_DIR" \
-    && sudo -u "$RUN_USER" "$CLI_DIR/.venv/bin/guppi" --help >/dev/null 2>&1 \
-    || fail "guppi CLI doesn't run even after a clean rebuild — re-run the installer."
-fi
+build_venv "$CLI_DIR" '.venv/bin/guppi --help' "guppi CLI"
 write_guppi_wrapper "$CLI_DIR/.venv/bin/guppi"
 # Verify the binary users actually invoke — the one on PATH — not just the venv
 # path above. A stale /usr/local/bin/guppi pointing at a previous, now-deleted
