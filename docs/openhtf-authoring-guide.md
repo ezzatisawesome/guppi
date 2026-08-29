@@ -681,7 +681,33 @@ unchanged, so the physical sweep is identical, just on schedule.
 
 ---
 
-## 10. Checklist — is this test "up to Guppi standards"?
+## 10. Bench pitfalls — assume nothing, verify everything
+
+The failures that cost real debugging time are the silent ones: every command is
+accepted, nothing errors, and the result is still wrong. They share a root cause —
+assuming instead of verifying — and a cure: make each link in the chain prove
+itself in the results.
+
+- **Power-up order is part of the test.** Energize source → DUT → sink, and tear
+  down in reverse. A DUT with its own power management often refuses to arm
+  without its supply — silently. Because teardown de-energizes the bench between
+  phases, every phase must rebuild this chain, not just the first.
+- **Program the source fully.** Set voltage *and* current limit in the script; a
+  limit inherited from the front panel folds the supply back mid-sweep with no
+  error.
+- **Read back actuations.** Commanding an output on is not the same as it
+  engaging. Record a readback, and confirm the stimulus physically happened
+  before judging the DUT against it.
+- **Prove state by measurement, not status flags.** Device telemetry can lag or
+  mis-report; record it as a diagnostic and let physics — does current actually
+  flow? — carry the verdict. Poll for state changes with a deadline, never a
+  fixed sleep.
+- **When a step does nothing and nothing errors, look upstream.** Supply, limit,
+  mode, readbacks — in that order — before suspecting the DUT.
+
+---
+
+## 11. Checklist — is this test "up to Guppi standards"?
 
 - [ ] `TEST_PHASES` is a module-level list of phase functions.
 - [ ] Every device bound with `@htf.plug(NAME=DEVICE_ID)`; ids match `rig_config.yml`.
@@ -696,6 +722,10 @@ unchanged, so the physical sweep is identical, just on schedule.
 - [ ] Prompts appear only where a human is genuinely required.
 - [ ] Phases are resume-safe (a later phase can start from the state a former
       one left, or re-establishes what it needs).
+- [ ] Power-up order is explicit in every phase (source → DUT → sink, reversed
+      on teardown); sources have voltage AND current limit programmed (§10).
+- [ ] Actuations are read back and state is proven by measurement, not by DUT
+      status flags (§10).
 - [ ] For the MP4300: mode → bandwidth → curve → protection → enable, in that
       order; curves stay inside the per-slot module envelope; `set_sas_curve`
       exceptions are trusted; `wait_operation_complete()` before dependent
