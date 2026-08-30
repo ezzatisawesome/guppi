@@ -698,6 +698,11 @@ itself in the results.
 - **Read back actuations.** Commanding an output on is not the same as it
   engaging. Record a readback, and confirm the stimulus physically happened
   before judging the DUT against it.
+- **Interrogate instrument config before energizing.** Panel-set state — a
+  load's turn-on voltage (Von), slew rates, protection setpoints, inherited
+  limits — can silently veto a test with no error anywhere. It is all readable
+  over the wire: set what you depend on explicitly, and treat anything you
+  didn't set as unknown, not default.
 - **Prove state by measurement, not status flags.** Device telemetry can lag or
   mis-report; record it as a diagnostic and let physics — does current actually
   flow? — carry the verdict. Poll for state changes with a deadline, never a
