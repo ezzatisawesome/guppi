@@ -527,6 +527,43 @@ fi
 mkdir -p "$GUPPI_HOME/src"
 tar -xzf "$TMPD/guppi-src.tar.gz" -C "$GUPPI_HOME/src" --strip-components=1
 
+# ── venv reuse across upgrades ──────────────────────────────────────────────
+# The tree rotate above destroys every venv, yet most releases change only the
+# shipped bytecode, not the dependency set — and `uv sync` on a Pi is the single
+# slowest step of an update (minutes per venv). So: each successful build stamps
+# its venv with a hash of pyproject.toml + uv.lock (line 2: rack extras). When
+# the new tree's hash matches, hardlink-copy the venv out of src.prev — near
+# instant, and rollback is unaffected because src.prev keeps its own links.
+# The copied venv is verified before it's trusted (build_venv / the rack
+# installer), and a failed verify falls through to the full rebuild it always
+# did. Paths inside the venv (shebangs, the editable .pth) are absolute into
+# $GUPPI_HOME/src/… — the same path the new tree now occupies, so the reused
+# venv imports the NEW code.
+# Fail CLOSED: a missing manifest yields an EMPTY stamp (callers' -n guards then
+# force a full rebuild). Do NOT "simplify" to `cat … 2>/dev/null | sha256sum`:
+# sha256sum happily hashes empty stdin to a CONSTANT, so two broken tarballs
+# would get MATCHING stamps and false-skip. .python-version is hashed too — a
+# venv built on one interpreter must not be reused after a pin bump.
+venv_stamp() {
+  [ -f "$1/pyproject.toml" ] && [ -f "$1/uv.lock" ] || return 0
+  { cat "$1/pyproject.toml" "$1/uv.lock"; cat "$1/.python-version" 2>/dev/null || true; } \
+    | sha256sum | cut -d' ' -f1 || true
+}
+if [ -d "$GUPPI_HOME/src.prev" ]; then
+  for _pkg in agent cli rack; do
+    _prev="$GUPPI_HOME/src.prev/packages/$_pkg"
+    _new="$GUPPI_HOME/src/packages/$_pkg"
+    _stamp="$(venv_stamp "$_new")"
+    if [ -n "$_stamp" ] && [ -f "$_prev/.venv/.guppi-sync-stamp" ] \
+       && [ "$(head -n1 "$_prev/.venv/.guppi-sync-stamp")" = "$_stamp" ]; then
+      # rm first: cp -al onto an existing dir NESTS the copy inside it (a stray
+      # .venv shipped in the tarball would silently defeat the reuse).
+      rm -rf "$_new/.venv"
+      cp -al "$_prev/.venv" "$_new/.venv" 2>/dev/null || rm -rf "$_new/.venv"
+    fi
+  done
+fi
+
 echo "── [4/7] Prebuilt UI bundle ──"
 rm -rf "$GUPPI_HOME/ui"; mkdir -p "$GUPPI_HOME/ui"
 if [ -n "${GUPPI_UI_TARBALL:-}" ]; then
@@ -601,7 +638,12 @@ command -v uv >/dev/null 2>&1 \
 sync_venv() {  # $1=dir
   local dir="$1"
   ( cd "$dir" && sudo -u "$RUN_USER" uv sync --frozen --no-dev -q ) && return 0
-  echo "   uv sync failed — clearing the uv cache and rebuilding once"
+  # Retry once WITHOUT purging first: a transient PyPI/network blip is far more
+  # common than a poisoned cache, and a purge turns a 5s retry into a full
+  # re-download of every wheel.
+  echo "   uv sync failed — retrying once"
+  ( cd "$dir" && sudo -u "$RUN_USER" uv sync --frozen --no-dev -q ) && return 0
+  echo "   uv sync failed again — clearing the uv cache and rebuilding once"
   sudo -u "$RUN_USER" uv cache clean >/dev/null 2>&1 || true
   rm -rf "$dir/.venv"
   ( cd "$dir" && sudo -u "$RUN_USER" uv sync --frozen --no-dev -q )
@@ -618,7 +660,19 @@ sync_venv() {  # $1=dir
 # → "No module named 'idna.package_data'") — purge the cache and rebuild once if
 # the import check fails.
 build_venv() {  # $1=dir  $2=verify-cmd (run in $dir as $RUN_USER)  $3=label
-  local dir="$1" verify="$2" label="$3"
+  local dir="$1" verify="$2" label="$3" stamp
+  stamp=$(venv_stamp "$dir")
+  # A venv reused from src.prev (hardlink-copied after extraction, stamped
+  # against THIS tree's lockfiles) skips the multi-minute uv sync entirely —
+  # but only if it actually imports. Any failure falls through to the full
+  # rebuild below, so this can only save time, never correctness.
+  if [ -n "$stamp" ] \
+     && [ -f "$dir/.venv/.guppi-sync-stamp" ] \
+     && [ "$(head -n1 "$dir/.venv/.guppi-sync-stamp")" = "$stamp" ] \
+     && ( cd "$dir" && sudo -u "$RUN_USER" bash -c "$verify" ) >/dev/null 2>&1; then
+    echo "   $label venv: dependencies unchanged — reused previous venv (skipped uv sync)"
+    return 0
+  fi
   rm -rf "$dir/.venv"
   sync_venv "$dir" || fail "building the $label venv (uv sync) failed — re-run the installer."
   if [ -n "$verify" ] && ! ( cd "$dir" && sudo -u "$RUN_USER" bash -c "$verify" ) >/dev/null 2>&1; then
@@ -629,6 +683,10 @@ build_venv() {  # $1=dir  $2=verify-cmd (run in $dir as $RUN_USER)  $3=label
       && ( cd "$dir" && sudo -u "$RUN_USER" bash -c "$verify" ) >/dev/null 2>&1 \
       || fail "$label venv doesn't run even after a clean rebuild — re-run the installer."
   fi
+  # Stamp the verified venv so the next upgrade can reuse it when the
+  # dependency set is unchanged (see the reuse block after extraction).
+  echo "$stamp" > "$dir/.venv/.guppi-sync-stamp"
+  chown "$RUN_USER:" "$dir/.venv/.guppi-sync-stamp"
 }
 # The tarball was extracted as root; uv sync (and the .venv it creates) run as
 # $RUN_USER, so the tree must be theirs before syncing.
