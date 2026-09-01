@@ -132,7 +132,12 @@ if [ "$COMPONENT" = rack ]; then
   fi
   echo "── Fetching guppi source (rack component, ${GUPPI_REF:-latest release}) ──"
   TMPD=$(mktemp -d /tmp/guppi-install.XXXXXX)
-  fetch() { curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 "$@"; }
+  # --speed-limit/--speed-time abort a stalled transfer so --retry restarts it;
+  # --connect-timeout alone bounds only the handshake (see the main fetch()).
+  fetch() {
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+      --speed-limit 1024 --speed-time 30 "$@"
+  }
   if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
     cp "$GUPPI_SRC_TARBALL" "$TMPD/guppi-src.tar.gz"
   else
@@ -243,7 +248,14 @@ trap 'if [ -n "${DOWNLOADS_PID:-}" ]; then kill "$DOWNLOADS_PID" 2>/dev/null || 
 
 # All downloads retry; fetch to a FILE, never pipe into tar — a mid-stream
 # hiccup inside a pipe under pipefail kills the whole script with no retry.
-fetch() { curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 "$@"; }
+# --speed-limit/--speed-time abort a STALLED transfer (fewer than 1 KB/s for
+# 30s) so --retry can actually restart it. --connect-timeout alone bounds only
+# the handshake, not the byte stream: a connected-then-stalled curl (flaky Pi
+# wifi, a CDN hiccup) otherwise hangs forever with no output and never retries.
+fetch() {
+  curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+    --speed-limit 1024 --speed-time 30 "$@"
+}
 
 # Latest release tag for a GitHub repo, with a known-good pinned fallback for
 # when the unauthenticated GitHub API is rate-limited (60 req/hr per IP —
