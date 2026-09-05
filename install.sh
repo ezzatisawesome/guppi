@@ -1,0 +1,919 @@
+#!/usr/bin/env bash
+# ============================================================================
+# Guppi installer — one script, two components:
+#
+#   curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
+#     → hub (the default): the bench servers — everything documented below
+#   ... | sudo bash -s -- rack
+#     → rack: device I/O on the machine wired to the instruments. Resolves the
+#       rack component — a checkout beside this script (dev/CI), the tree a hub
+#       install left at /opt/guppi/src, or the release source tarball — then
+#       hands over to packages/rack/install.sh with args passed through.
+#
+# Uninstall:  ... | sudo bash -s -- --uninstall          (hub; GUPPI_PURGE_DATA=1
+#             ... | sudo bash -s -- rack --uninstall      also drops the database)
+#
+# (Canonical source lives in the monorepo at scripts/install.sh; the release
+# workflow publishes it to the public distribution repo's root.)
+#
+# Installs the full offline bench (docs/single-pi-architecture.md §8.3):
+#   • PostgreSQL (>= 15; distro package, or pgdg when the distro ships older)
+#     — the ONLY thing that runs as a system service
+#   • PostgREST (release binary)        — the browser's read-only layer
+#   • nats-server (release binary)      — the broker
+#   • guppi hub (core agent, uv venv)   — ingest, commands, pairing, UI serving
+#   • prebuilt UI bundle                — no Node runtime, no on-Pi build
+#
+# The Guppi servers are NOT daemons: `guppi-hub` runs NATS + PostgREST + the
+# hub in the FOREGROUND, logs in your terminal, Ctrl-C stops everything.
+# Closing the terminal stops it; after a reboot, run `guppi-hub` again —
+# nothing auto-starts. Data lives in /var/lib/guppi; the dashboard is
+# at http://<host>:8000 while guppi-hub runs. Zero cloud, zero account, zero
+# login. Pair a bench by running
+#   curl ... | sudo bash -s -- rack
+# on the machine wired to the instruments — on this same box it auto-claims
+# over loopback.
+#
+# Supported: Debian bookworm/bullseye, Ubuntu 20.04+, Raspberry Pi OS 64-bit,
+# on arm64 or amd64, running systemd (for PostgreSQL). 32-bit OS images
+# (armhf/armv7l) are detected and refused — PostgREST has no 32-bit builds.
+#
+# Pinning: default is the latest release tag; each release also attaches its
+# own install.sh pre-pinned to that tag (the release workflow substitutes the
+# GUPPI_REF default), so a pinned install is reproducible end-to-end. Release
+# assets are verified against the release's SHA256SUMS when present.
+# Re-running upgrades in place (stop guppi-hub first); the previous tree is
+# kept until the new hub passes a start-and-answer check, and a failed
+# upgrade rolls back.
+#
+# Air-gapped / CI installs: set GUPPI_SRC_TARBALL (and optionally
+# GUPPI_UI_TARBALL) to local tarball paths to skip the GitHub downloads.
+#
+# KNOWN v0 LIMITATION (tracked in the doc §11): NATS runs with the anonymous
+# dev config. The browser viewer is read-only by convention, not enforcement,
+# until local auth-callout key generation lands. On a trusted bench LAN this
+# matches the "anyone may view" posture.
+# ============================================================================
+set -Eeuo pipefail
+
+fail() { echo ""; echo "✗ $*" >&2; exit 1; }
+trap 'echo ""; echo "✗ Install failed at line $LINENO (see the message above)." >&2;
+      echo "  Re-running the installer is safe — it picks up where it left off." >&2' ERR
+
+[ "$(id -u)" -eq 0 ] || fail "Run as root:  curl ... | sudo bash"
+# Resolve our own directory BEFORE `cd /` — when invoked as `bash scripts/install.sh`
+# (dev/CI), BASH_SOURCE is a relative path that only resolves against the original
+# cwd. Doing this after the cd would silently yield an empty SELF_DIR, so the rack
+# handoff below never finds the sibling tree (forces a fetch on install, hard-fails
+# on uninstall). A curl|bash pipe has no real path here → SELF_DIR stays empty, which
+# correctly falls through to the fetch path.
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]:-/nonexistent}")" 2>/dev/null && pwd || true)
+cd /   # sudo -u postgres commands warn if cwd is unreadable (e.g. /root)
+
+REPO="ezzatisawesome/guppi"
+GUPPI_REF="${GUPPI_REF:-}"
+GUPPI_HOME=/opt/guppi
+GUPPI_DATA=/var/lib/guppi
+GUPPI_ETC=/etc/guppi
+LAUNCHER=/usr/local/bin/guppi-hub
+# The operator owns and runs everything (like the rack): whoever invoked sudo.
+RUN_USER="${SUDO_USER:-root}"
+
+# ── Component routing ───────────────────────────────────────────────────────
+# `... rack [args]` resolves the rack component and hands over to it entirely
+# (args pass through, so `rack --uninstall` works). Resolution order: a
+# checkout beside this script (dev/CI), a tree a hub install already left at
+# /opt/guppi/src (the co-located case — no second download), or the release
+# source tarball. No hub preflight runs on this path: the rack has no apt,
+# systemd, or PostgreSQL requirements.
+COMPONENT=hub
+case "${1:-}" in hub|rack) COMPONENT="$1"; shift ;; esac
+
+# ── Access gate ──────────────────────────────────────────────────────────────
+# Invite-gating the installer is OFF by default for now: install/update is open.
+# Re-enable by exporting GUPPI_ACCESS_ENFORCE=1 (then a valid access code is
+# required, validated against the hosted checker). Even when enforced, the gate
+# is skipped for uninstall (below), for air-gapped/CI installs (GUPPI_SRC_TARBALL),
+# and for an explicit GUPPI_ACCESS_SKIP=1.
+check_access() {
+  [ "${GUPPI_ACCESS_ENFORCE:-0}" = "1" ] || return 0
+  [ "${GUPPI_ACCESS_SKIP:-0}" = "1" ] && return 0
+  [ -n "${GUPPI_SRC_TARBALL:-}" ] && return 0
+  local url="${GUPPI_ACCESS_URL:-https://guppi-agent.fly.dev}"
+  local code="${GUPPI_ACCESS_CODE:-}"
+  [ -n "$code" ] || fail "An access code is required. Re-run with:
+    ... | sudo GUPPI_ACCESS_CODE=YOUR_CODE bash
+  Don't have one? Join the waitlist at https://app.guppidev.com/waitlist"
+  local resp
+  resp=$(curl -fsS --connect-timeout 15 -X POST "$url/access/check" \
+    -H "Content-Type: application/json" -d "{\"code\":\"$code\"}" 2>/dev/null || true)
+  case "$resp" in
+    *'"valid":true'*)  echo "  ✓ access code accepted" ;;
+    *'"valid":false'*) fail "That access code isn't valid. Join the waitlist at https://app.guppidev.com/waitlist" ;;
+    *)                 fail "Couldn't reach the access validator at $url — check your connection and retry." ;;
+  esac
+}
+if [ "${1:-}" != "--uninstall" ] && [ "${GUPPI_UNINSTALL:-0}" != "1" ]; then
+  check_access
+fi
+
+if [ "$COMPONENT" = rack ]; then
+  # Only hand off to a rack install.sh sitting NEXT TO this script (a bundled or
+  # checked-out tree). Do NOT fall back to the on-disk $GUPPI_HOME tree here: a
+  # `curl | bash -s -- rack` update must fetch the pinned release below, not
+  # re-exec whatever stale copy is already installed (which silently pins the box
+  # to its current version). Air-gapped reuse still works via GUPPI_SRC_TARBALL.
+  # SELF_DIR was resolved at the top, before `cd /` (see there for why).
+  for RACK_SH in ${SELF_DIR:+"$SELF_DIR/../packages/rack/install.sh"}; do
+    if [ -f "$RACK_SH" ]; then exec bash "$RACK_SH" "$@"; fi
+  done
+  if [ "${1:-}" = "--uninstall" ]; then
+    fail "no rack install found on this box — nothing to uninstall."
+  fi
+  echo "── Fetching guppi source (rack component, ${GUPPI_REF:-latest release}) ──"
+  TMPD=$(mktemp -d /tmp/guppi-install.XXXXXX)
+  # --speed-limit/--speed-time abort a stalled transfer so --retry restarts it;
+  # --connect-timeout alone bounds only the handshake (see the main fetch()).
+  fetch() {
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+      --speed-limit 1024 --speed-time 30 "$@"
+  }
+  if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
+    cp "$GUPPI_SRC_TARBALL" "$TMPD/guppi-src.tar.gz"
+  else
+    if [ -z "$GUPPI_REF" ]; then
+      # Response into a variable FIRST (see latest_tag below for why no pipe).
+      JSON=$(fetch "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null || true)
+      GUPPI_REF=$(grep -m1 '"tag_name"' <<<"$JSON" | cut -d'"' -f4 || true)
+      [ -n "$GUPPI_REF" ] || { rm -rf "$TMPD"; fail "No public release found on $REPO — set GUPPI_REF to a tag."; }
+    fi
+    fetch -o "$TMPD/guppi-src.tar.gz" \
+      "https://github.com/$REPO/releases/download/$GUPPI_REF/guppi-src.tar.gz" \
+      || { rm -rf "$TMPD"; fail "No guppi-src.tar.gz asset on release $GUPPI_REF"; }
+  fi
+  mkdir -p "$GUPPI_HOME/src"
+  tar -xzf "$TMPD/guppi-src.tar.gz" -C "$GUPPI_HOME/src" --strip-components=1
+  rm -rf "$TMPD"   # exec replaces this process, so clean up before handing over
+  exec bash "$GUPPI_HOME/src/packages/rack/install.sh" "$@"
+fi
+
+# ── Uninstall ────────────────────────────────────────────────────────────────
+# Reverses everything this installer wrote. Data (the database and
+# /var/lib/guppi) survives unless GUPPI_PURGE_DATA=1 — an uninstall shouldn't
+# silently erase months of bench telemetry.
+if [ "${1:-}" = "--uninstall" ] || [ "${GUPPI_UNINSTALL:-0}" = "1" ]; then
+  echo "── Uninstalling guppi ──"
+  # Legacy: releases up to v0.1.0-rc.3 ran the servers as systemd services.
+  systemctl disable --now guppi-hub guppi-postgrest guppi-nats 2>/dev/null || true
+  rm -f /etc/systemd/system/guppi-hub.service \
+        /etc/systemd/system/guppi-postgrest.service \
+        /etc/systemd/system/guppi-nats.service \
+        /etc/systemd/journald.conf.d/guppi.conf
+  systemctl daemon-reload
+  rm -f "$LAUNCHER"
+  # /usr/local/bin/guppi is our bench wrapper (older installs: a symlink into
+  # /opt/guppi's cli venv). Remove either — but never a pipx/pip-installed CLI,
+  # which lives elsewhere, carries no wrapper marker, and points outside GUPPI_HOME.
+  if [ -f /usr/local/bin/guppi ] && grep -q 'guppi-bench-wrapper' /usr/local/bin/guppi 2>/dev/null; then
+    rm -f /usr/local/bin/guppi
+  elif [ -L /usr/local/bin/guppi ]; then
+    case "$(readlink /usr/local/bin/guppi)" in "$GUPPI_HOME"/*) rm -f /usr/local/bin/guppi ;; esac
+  fi
+  rm -rf "$GUPPI_HOME" "$GUPPI_ETC"
+  rm -f /usr/local/bin/nats-server /usr/local/bin/postgrest
+  if [ "${GUPPI_PURGE_DATA:-0}" = "1" ]; then
+    sudo -u postgres dropdb --if-exists guppi 2>/dev/null || true
+    sudo -u postgres dropuser --if-exists guppi 2>/dev/null || true
+    sudo -u postgres dropuser --if-exists guppi_authenticator 2>/dev/null || true
+    sudo -u postgres dropuser --if-exists web_anon 2>/dev/null || true
+    PG_HBA=$(sudo -u postgres psql -qAt -c "SHOW hba_file;" 2>/dev/null || true)
+    [ -n "$PG_HBA" ] && [ -f "$PG_HBA" ] \
+      && sed -i '/guppi_authenticator\|local   guppi   guppi/d' "$PG_HBA" \
+      && systemctl reload postgresql 2>/dev/null || true
+    rm -rf "$GUPPI_DATA"
+    userdel guppi 2>/dev/null || true   # legacy service user, if present
+    echo "✓ Uninstalled (database and data purged)."
+  else
+    echo "✓ Uninstalled. Kept the database and $GUPPI_DATA — rerun with"
+    echo "  GUPPI_PURGE_DATA=1 to remove them too. PostgreSQL itself stays."
+  fi
+  exit 0
+fi
+
+# ── Preflight: refuse early, clearly, instead of dying mid-install ──────────
+command -v apt-get >/dev/null 2>&1 \
+  || fail "apt-get not found — Guppi installs on Debian-family systems (Debian, Ubuntu, Raspberry Pi OS)."
+[ -d /run/systemd/system ] \
+  || fail "systemd is not running — needed to manage PostgreSQL (containers/WSL without systemd won't work)."
+
+ARCH=$(uname -m)
+case "$ARCH" in
+  # PostgREST renamed its arm64 asset in v16.0 (ubuntu-aarch64 →
+  # linux-static-aarch64); older releases (incl. the pinned fallback) only
+  # have the old name, so list both and try in order.
+  aarch64|arm64) PGRST_ARCHES="linux-static-aarch64 ubuntu-aarch64"; NATS_ARCH="arm64" ;;
+  x86_64)        PGRST_ARCHES="linux-static-x86-64"; NATS_ARCH="amd64" ;;
+  armv7l|armv6l)
+    fail "32-bit OS detected ($ARCH). Guppi needs a 64-bit OS — on a Pi 4/5, flash the 64-bit Raspberry Pi OS image." ;;
+  *) fail "Unsupported architecture: $ARCH (need arm64 or amd64)" ;;
+esac
+# Pi OS gotcha: 64-bit kernel over a 32-bit userland reports aarch64 but can't
+# run arm64 binaries. Check what dpkg actually installs.
+if [ "$ARCH" = "aarch64" ] && command -v dpkg >/dev/null 2>&1; then
+  DPKG_ARCH=$(dpkg --print-architecture)
+  [ "$DPKG_ARCH" = "arm64" ] \
+    || fail "64-bit kernel but a $DPKG_ARCH (32-bit) userland — flash the 64-bit Raspberry Pi OS image."
+fi
+
+MEM_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 99999)
+[ "$MEM_MB" -ge 1800 ] || echo "   WARNING: ${MEM_MB}MB RAM — 2GB+ recommended; expect swapping under load."
+DISK_MB=$(df -Pm /opt 2>/dev/null | awk 'NR==2{print $4}' || echo 99999)
+[ "${DISK_MB:-99999}" -ge 2048 ] || echo "   WARNING: only ${DISK_MB}MB free on /opt — 2GB+ recommended."
+
+# One installer at a time — two concurrent runs interleave apt, chown, and
+# file swaps into a mess.
+exec 9>/var/lock/guppi-install.lock
+flock -n 9 || fail "Another guppi installer is already running."
+
+# Downloads land in a private temp dir (no fixed /tmp names — no collisions,
+# no symlink games) that's removed on any exit.
+TMPD=$(mktemp -d /tmp/guppi-install.XXXXXX)
+# Reap the background download job (launched in [1/7]) BEFORE removing TMPD: a
+# foreground failure in the concurrent window — the whole PostgreSQL install
+# between the bg launch and the `wait` in [3/7] — would otherwise fire this trap
+# and rm -rf TMPD out from under a still-running curl, orphaning it (reparented
+# to init, writing into a deleted path). kill+wait first, then clean up. Both are
+# no-ops once [3/7] has already waited, and no-ops when DOWNLOADS_PID is unset.
+trap 'if [ -n "${DOWNLOADS_PID:-}" ]; then kill "$DOWNLOADS_PID" 2>/dev/null || true; wait "$DOWNLOADS_PID" 2>/dev/null || true; fi; rm -rf "$TMPD"' EXIT
+
+# All downloads retry; fetch to a FILE, never pipe into tar — a mid-stream
+# hiccup inside a pipe under pipefail kills the whole script with no retry.
+# --speed-limit/--speed-time abort a STALLED transfer (fewer than 1 KB/s for
+# 30s) so --retry can actually restart it. --connect-timeout alone bounds only
+# the handshake, not the byte stream: a connected-then-stalled curl (flaky Pi
+# wifi, a CDN hiccup) otherwise hangs forever with no output and never retries.
+fetch() {
+  curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+    --speed-limit 1024 --speed-time 30 "$@"
+}
+
+# Latest release tag for a GitHub repo, with a known-good pinned fallback for
+# when the unauthenticated GitHub API is rate-limited (60 req/hr per IP —
+# easy to hit re-running the installer). Fetch the whole response into a
+# variable FIRST, then parse: piping curl straight into `grep -m1` races
+# (grep exits on first match, curl gets EPIPE = exit 23, pipefail kills us).
+latest_tag() {
+  local repo="$1" fallback="${2:-}" json tag
+  if json=$(fetch "https://api.github.com/repos/$repo/releases/latest" 2>/dev/null); then
+    tag=$(grep -m1 '"tag_name"' <<<"$json" | cut -d'"' -f4 || true)
+  fi
+  if [ -z "${tag:-}" ]; then
+    [ -n "$fallback" ] || return 1
+    echo "   NOTE: GitHub API unavailable (rate limit?) — using pinned $repo $fallback" >&2
+    tag="$fallback"
+  fi
+  echo "$tag"
+}
+
+# Verify a downloaded release asset against the release's SHA256SUMS (present
+# on releases cut after checksums landed; older releases skip with a note).
+verify_asset() {
+  local name="$1"
+  [ -f "$TMPD/SHA256SUMS" ] || return 0
+  if ! grep -q " $name\$" "$TMPD/SHA256SUMS"; then
+    echo "   NOTE: $name not in SHA256SUMS — skipping verification"
+    return 0
+  fi
+  (cd "$TMPD" && grep " $name\$" SHA256SUMS | sha256sum -c - >/dev/null) \
+    || fail "$name failed checksum verification against $GUPPI_REF's SHA256SUMS"
+  echo "   $name: checksum OK"
+}
+
+# Fetch every release asset we need into $TMPD, ready for the foreground steps
+# to verify + extract. Launched as a BACKGROUND job in [1/7] so the (network-
+# bound) pulls overlap the PostgreSQL apt install + cluster bring-up, which need
+# none of them; [3/7]/[4/7]/[5/7] `wait` on it, then verify + extract. Reads
+# GUPPI_REF/$DL/arch vars set before it's launched. Its own errexit trap is
+# cleared so a failed fetch surfaces cleanly at the `wait` (as our explicit
+# message) instead of also firing the generic line-trap from inside the subshell.
+stage_downloads() {
+  trap - ERR
+  if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
+    cp "$GUPPI_SRC_TARBALL" "$TMPD/guppi-src.tar.gz"
+  else
+    fetch -o "$TMPD/SHA256SUMS" "$DL/SHA256SUMS" 2>/dev/null || true
+    fetch -o "$TMPD/guppi-src.tar.gz" "$DL/guppi-src.tar.gz" \
+      || fail "No guppi-src.tar.gz asset on release $GUPPI_REF"
+    # UI bundle is best-effort (the hub can run API-only). A local override is
+    # extracted straight from its path in [4/7], so skip the download then.
+    if [ -z "${GUPPI_UI_TARBALL:-}" ]; then
+      fetch -o "$TMPD/guppi-ui-local.tar.gz" "$DL/guppi-ui-local.tar.gz" 2>/dev/null \
+        || rm -f "$TMPD/guppi-ui-local.tar.gz"
+    fi
+  fi
+  # Broker + read-layer binaries (from their own repos, so staged even for an
+  # air-gapped src tarball) — only if not already on PATH. [5/7] extracts these.
+  if ! command -v nats-server >/dev/null 2>&1; then
+    local nats_ver
+    nats_ver=$(latest_tag nats-io/nats-server v2.14.3)
+    fetch -o "$TMPD/nats.tar.gz" \
+      "https://github.com/nats-io/nats-server/releases/download/$nats_ver/nats-server-$nats_ver-linux-$NATS_ARCH.tar.gz" \
+      || fail "Couldn't download nats-server $nats_ver"
+  fi
+  if ! command -v postgrest >/dev/null 2>&1; then
+    local pgrst_ver ok="" arch
+    pgrst_ver=$(latest_tag PostgREST/postgrest v14.15)
+    for arch in $PGRST_ARCHES; do
+      if fetch -o "$TMPD/postgrest.tar.xz" \
+        "https://github.com/PostgREST/postgrest/releases/download/$pgrst_ver/postgrest-$pgrst_ver-$arch.tar.xz"; then
+        ok=1; break
+      fi
+    done
+    [ -n "$ok" ] || fail "Couldn't download PostgREST $pgrst_ver (tried: $PGRST_ARCHES)"
+  fi
+}
+
+# Whether something is already answering on the hub port. -m bounds the probe:
+# uvicorn binds its socket BEFORE app startup completes, so a hub wedged in
+# startup accepts the connection and never answers — an unbounded curl hangs.
+hub_answers() {
+  local code
+  code=$(curl -m 2 -so /dev/null -w '%{http_code}' http://localhost:8000/ 2>/dev/null || true)
+  [ -n "$code" ] && [ "$code" != "000" ]
+}
+
+# Install /usr/local/bin/guppi as a resilient wrapper rather than a bare symlink
+# into the venv. A symlink that points at a missing venv (mid-upgrade, a
+# half-built sync, a prior install that couldn't clean it) leaves the operator
+# with a bare `command not found` and no way to run `guppi update` to repair it.
+# The wrapper execs the real CLI when the venv is built, and otherwise still
+# dispatches `guppi hub`/`guppi rack` to the co-installed launchers and tells the
+# operator how to rebuild everything else. CLI_BIN is an absolute path, so the
+# wrapper never needs repointing across tree swaps or rollbacks.
+write_guppi_wrapper() {
+  local cli_bin="${1:-/opt/guppi/src/packages/cli/.venv/bin/guppi}"
+  # Write to a fresh temp path, then atomically mv into place. NEVER redirect
+  # straight onto /usr/local/bin/guppi: on boxes where it is a legacy SYMLINK
+  # into the cli venv (older installs symlinked instead of wrapping), a bare `>`
+  # FOLLOWS the symlink and writes this wrapper straight into .venv/bin/guppi —
+  # clobbering the real Python entrypoint uv sync just built, so CLI_BIN ends up
+  # pointing at a copy of the wrapper (self-exec loop). rm -f the temp first so
+  # `>` can't follow a stale symlink there either; mv -f replaces the symlink at
+  # the destination with a regular file.
+  rm -f /usr/local/bin/guppi.tmp
+  { echo '#!/usr/bin/env bash'
+    echo '# guppi-bench-wrapper — front door to the CLI. Execs the Python CLI in the'
+    echo '# source-tree venv when it is built; degrades gracefully when it is not.'
+    echo "CLI_BIN=$cli_bin"
+    cat <<'GUPPI_WRAP'
+# Self-exec guard. A broken install can leave CLI_BIN pointing at a copy of
+# THIS wrapper (a killed `uv sync` once left the venv entrypoint as the wrapper
+# itself) — `exec "$CLI_BIN"` would then re-enter here and spin at 100% CPU
+# forever, printing nothing. Refuse to exec a target that resolves to our own
+# path; fall through to the repair message instead of hanging the box.
+__self=$(readlink -f "$0" 2>/dev/null || echo "$0")
+__target=$(readlink -f "$CLI_BIN" 2>/dev/null || echo "$CLI_BIN")
+if [ -x "$CLI_BIN" ] && [ "$__target" != "$__self" ]; then exec "$CLI_BIN" "$@"; fi
+if [ "$__target" = "$__self" ]; then
+  echo "guppi: CLI venv is broken (entrypoint points back at this wrapper)." >&2
+fi
+cmd="${1:-}"; [ $# -gt 0 ] && shift
+case "$cmd" in
+  hub)
+    if [ -x /usr/local/bin/guppi-hub ];  then exec /usr/local/bin/guppi-hub  "$@"; fi
+    echo "guppi: no hub installed on this box." >&2; exit 127 ;;
+  rack)
+    if [ -x /usr/local/bin/guppi-rack ]; then exec /usr/local/bin/guppi-rack "$@"; fi
+    echo "guppi: no rack installed on this box." >&2; exit 127 ;;
+  *)
+    echo "guppi: the CLI isn't built ($CLI_BIN is missing)." >&2
+    echo "Repair it:  curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash" >&2
+    exit 127 ;;
+esac
+GUPPI_WRAP
+  } >/usr/local/bin/guppi.tmp
+  chmod 755 /usr/local/bin/guppi.tmp
+  mv -f /usr/local/bin/guppi.tmp /usr/local/bin/guppi
+}
+
+# apt on a freshly booted Pi: unattended-upgrades often holds the dpkg lock
+# for the first minutes. Wait for it instead of dying.
+APT="apt-get -o DPkg::Lock::Timeout=180 -qq"
+
+echo "── [1/7] System packages (PostgreSQL >= 15, curl, tar) ──"
+export DEBIAN_FRONTEND=noninteractive
+$APT update || echo "   WARNING: apt-get update reported errors — continuing with cached package lists"
+$APT install -y curl ca-certificates tar xz-utils >/dev/null
+
+# Resolve the release ref and start pulling release assets in the BACKGROUND now
+# (curl/tar are in place), so the downloads overlap the PostgreSQL install +
+# cluster bring-up below — they need nothing from PostgreSQL. [3/7] waits on this
+# before extracting. Air-gapped installs (GUPPI_SRC_TARBALL) stage here too, so
+# the same wait/extract path runs regardless of source.
+if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
+  GUPPI_REF="${GUPPI_REF:-local}"
+elif [ -z "$GUPPI_REF" ]; then
+  GUPPI_REF=$(latest_tag "$REPO" || true)
+  [ -n "$GUPPI_REF" ] || fail "No public release found on $REPO — set GUPPI_REF to a tag (GitHub API may be rate-limited; retry in a few minutes)"
+fi
+DL="https://github.com/$REPO/releases/download/$GUPPI_REF"
+stage_downloads & DOWNLOADS_PID=$!
+
+# Install postgresql-common (it provides pg_lsclusters) BEFORE the postgresql
+# metapackage. apt preconfigures every package in one `install` up front, and
+# the postgresql metapackage's debconf .config calls pg_lsclusters — which
+# isn't on PATH yet if postgresql-common is being unpacked in the same batch
+# (harmless but prints "pg_lsclusters: not found"). Splitting the calls fixes it.
+$APT install -y postgresql-common postgresql-client-common >/dev/null
+$APT install -y postgresql postgresql-client >/dev/null
+
+# Distro PostgreSQL too old (Ubuntu 22.04 ships 14, bullseye 13)? Add the
+# official pgdg repo via the helper postgresql-common ships, install current.
+PG_MAJOR=$(psql --version | awk '{split($3,v,"."); print v[1]}')
+if [ "$PG_MAJOR" -lt 15 ]; then
+  echo "   distro PostgreSQL is $PG_MAJOR — adding the official pgdg repo for a current version"
+  $APT install -y postgresql-common >/dev/null
+  if [ -x /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh ]; then
+    /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null \
+      || fail "Couldn't add the pgdg apt repo. Add PostgreSQL >= 15 manually and re-run."
+  else
+    # Older postgresql-common (e.g. Ubuntu 22.04) predates the helper — add
+    # the repo by hand: signing key + one sources.list.d entry.
+    install -d /usr/share/postgresql-common/pgdg
+    fetch -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+      https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+      || fail "Couldn't fetch the pgdg signing key. Add PostgreSQL >= 15 manually and re-run."
+    CODENAME=$(. /etc/os-release && echo "$VERSION_CODENAME")
+    echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $CODENAME-pgdg main" \
+      > /etc/apt/sources.list.d/pgdg.list
+  fi
+  $APT update || true
+  $APT install -y postgresql-17 postgresql-client-17 >/dev/null
+fi
+systemctl enable --now postgresql >/dev/null
+
+# Installing the server package normally auto-creates a cluster — but some
+# images (GitHub runners; possibly trimmed distro spins) ship postgresql-common
+# with cluster auto-creation disabled. If no >= 15 cluster exists, create one
+# from the newest installed >= 15 binaries.
+if ! pg_lsclusters --no-header 2>/dev/null | awk '$1+0>=15{f=1} END{exit !f}'; then
+  NEWEST=$(ls /usr/lib/postgresql 2>/dev/null | awk '$1+0>=15' | sort -n | tail -1)
+  [ -n "$NEWEST" ] || { pg_lsclusters 2>&1 || true; fail "No PostgreSQL >= 15 installed — clusters above."; }
+  echo "   no cluster exists — creating $NEWEST/main"
+  pg_createcluster "$NEWEST" main >/dev/null \
+    || { pg_lsclusters 2>&1 || true; fail "pg_createcluster $NEWEST main failed."; }
+fi
+
+# Boxes can carry several clusters (distro 14 + pgdg 17 side by side, each on
+# its own port). Target the newest >= 15 cluster explicitly, by port.
+read -r PG_VER PG_CLUSTER PG_PORT <<<"$(pg_lsclusters --no-header 2>/dev/null \
+  | awk '$1+0>=15 {v=$1; c=$2; p=$3} END{print v, c, p}')"
+[ -n "${PG_PORT:-}" ] || { pg_lsclusters 2>&1 || true; fail "No PostgreSQL >= 15 cluster found after install (clusters above)."; }
+pg_ctlcluster "$PG_VER" "$PG_CLUSTER" start 2>/dev/null || true
+for _ in $(seq 1 30); do
+  sudo -u postgres pg_isready -q -p "$PG_PORT" 2>/dev/null && break; sleep 1
+done
+sudo -u postgres pg_isready -q -p "$PG_PORT" \
+  || fail "PostgreSQL cluster $PG_VER/$PG_CLUSTER (port $PG_PORT) didn't come up — check: journalctl -u postgresql"
+echo "   using PostgreSQL $PG_VER (cluster $PG_CLUSTER, port $PG_PORT)"
+PSQL="sudo -u postgres psql -p $PG_PORT"
+
+echo "── [2/7] Directories ──"
+mkdir -p "$GUPPI_HOME" "$GUPPI_DATA/artifacts" "$GUPPI_ETC"
+chown -R "$RUN_USER:" "$GUPPI_DATA"
+
+echo "── [3/7] Fetch guppi source (${GUPPI_REF:-latest release}) ──"
+# Everything installs from PUBLIC release assets on github.com/$REPO — no
+# account, no token, no clone. guppi-src.tar.gz is the public source subset
+# (hub + rack), built and attached by the release workflow. The pulls were
+# kicked off in [1/7]; wait for them, then verify + extract.
+wait "$DOWNLOADS_PID" \
+  || fail "downloading release assets failed — re-run the installer (GitHub API may be rate-limited; retry in a few minutes)."
+if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
+  echo "   using local tarball: $GUPPI_SRC_TARBALL"
+else
+  echo "   ref: $GUPPI_REF"
+  [ -f "$TMPD/SHA256SUMS" ] \
+    || echo "   NOTE: no SHA256SUMS on $GUPPI_REF (pre-checksum release) — skipping verification"
+  verify_asset guppi-src.tar.gz
+fi
+
+# Legacy migration: releases up to v0.1.0-rc.3 ran the servers as systemd
+# services under a 'guppi' system user. Retire the units; the operator's
+# guppi-hub command replaces them.
+# (file test, not `systemctl list-unit-files | grep -q` — grep -q quitting
+# early SIGPIPEs systemctl and the check silently skips)
+if [ -f /etc/systemd/system/guppi-hub.service ]; then
+  echo "   migrating: retiring the systemd services (guppi now runs via 'guppi-hub' in your terminal)"
+  systemctl disable --now guppi-hub guppi-postgrest guppi-nats 2>/dev/null || true
+  rm -f /etc/systemd/system/guppi-hub.service \
+        /etc/systemd/system/guppi-postgrest.service \
+        /etc/systemd/system/guppi-nats.service
+  systemctl daemon-reload
+fi
+
+# Upgrades happen with the hub STOPPED — swapping the tree under a running
+# server is a coin flip. Keep the old tree (and its venv) as src.prev until
+# the new hub proves it starts; a failed upgrade rolls back.
+hub_answers && fail "the hub is running — stop it first (Ctrl-C in the terminal running guppi hub) and re-run."
+UPGRADING=0
+if [ -d "$GUPPI_HOME/src" ]; then
+  UPGRADING=1
+  PREV_REF=$(cat "$GUPPI_ETC/version" 2>/dev/null || echo "unknown")
+  echo "   upgrading from $PREV_REF"
+  # Recover an interrupted prior upgrade: if src.prev ALREADY exists, a previous
+  # run died between this rotate and the success cleanup (rm -rf src.prev below).
+  # Then `src` is a HALF-BUILT new tree and src.prev is the last known-good.
+  # Discard the half-build and keep src.prev as the rollback base — rotating again
+  # would overwrite the good src.prev with the broken tree (PREV_REF, read from the
+  # version file written only on success, still names the good src.prev). This is
+  # what lets a re-run of `guppi update` self-heal instead of compounding.
+  if [ -d "$GUPPI_HOME/src.prev" ]; then
+    echo "   (recovering from an interrupted previous update — keeping last good tree)"
+    rm -rf "$GUPPI_HOME/src" "$GUPPI_HOME/ui"
+  else
+    mv "$GUPPI_HOME/src" "$GUPPI_HOME/src.prev"
+    if [ -d "$GUPPI_HOME/ui" ]; then mv "$GUPPI_HOME/ui" "$GUPPI_HOME/ui.prev"; fi
+  fi
+fi
+mkdir -p "$GUPPI_HOME/src"
+tar -xzf "$TMPD/guppi-src.tar.gz" -C "$GUPPI_HOME/src" --strip-components=1
+
+# ── venv reuse across upgrades ──────────────────────────────────────────────
+# The tree rotate above destroys every venv, yet most releases change only the
+# shipped bytecode, not the dependency set — and `uv sync` on a Pi is the single
+# slowest step of an update (minutes per venv). So: each successful build stamps
+# its venv with a hash of pyproject.toml + uv.lock (line 2: rack extras). When
+# the new tree's hash matches, hardlink-copy the venv out of src.prev — near
+# instant, and rollback is unaffected because src.prev keeps its own links.
+# The copied venv is verified before it's trusted (build_venv / the rack
+# installer), and a failed verify falls through to the full rebuild it always
+# did. Paths inside the venv (shebangs, the editable .pth) are absolute into
+# $GUPPI_HOME/src/… — the same path the new tree now occupies, so the reused
+# venv imports the NEW code.
+# Fail CLOSED: a missing manifest yields an EMPTY stamp (callers' -n guards then
+# force a full rebuild). Do NOT "simplify" to `cat … 2>/dev/null | sha256sum`:
+# sha256sum happily hashes empty stdin to a CONSTANT, so two broken tarballs
+# would get MATCHING stamps and false-skip. .python-version is hashed too — a
+# venv built on one interpreter must not be reused after a pin bump.
+venv_stamp() {
+  [ -f "$1/pyproject.toml" ] && [ -f "$1/uv.lock" ] || return 0
+  { cat "$1/pyproject.toml" "$1/uv.lock"; cat "$1/.python-version" 2>/dev/null || true; } \
+    | sha256sum | cut -d' ' -f1 || true
+}
+if [ -d "$GUPPI_HOME/src.prev" ]; then
+  for _pkg in agent cli rack; do
+    _prev="$GUPPI_HOME/src.prev/packages/$_pkg"
+    _new="$GUPPI_HOME/src/packages/$_pkg"
+    _stamp="$(venv_stamp "$_new")"
+    if [ -n "$_stamp" ] && [ -f "$_prev/.venv/.guppi-sync-stamp" ] \
+       && [ "$(head -n1 "$_prev/.venv/.guppi-sync-stamp")" = "$_stamp" ]; then
+      # rm first: cp -al onto an existing dir NESTS the copy inside it (a stray
+      # .venv shipped in the tarball would silently defeat the reuse).
+      rm -rf "$_new/.venv"
+      cp -al "$_prev/.venv" "$_new/.venv" 2>/dev/null || rm -rf "$_new/.venv"
+    fi
+  done
+fi
+
+echo "── [4/7] Prebuilt UI bundle ──"
+rm -rf "$GUPPI_HOME/ui"; mkdir -p "$GUPPI_HOME/ui"
+if [ -n "${GUPPI_UI_TARBALL:-}" ]; then
+  tar -xzf "$GUPPI_UI_TARBALL" -C "$GUPPI_HOME/ui"
+  echo "   installed from local tarball"
+elif [ -f "$TMPD/guppi-ui-local.tar.gz" ]; then
+  verify_asset guppi-ui-local.tar.gz
+  tar -xzf "$TMPD/guppi-ui-local.tar.gz" -C "$GUPPI_HOME/ui"
+  echo "   installed from release asset"
+else
+  echo "   WARNING: no UI bundle — hub runs API-only. Build the bundle on a"
+  echo "   dev box with:  make ui-local"
+  echo "   then untar guppi-ui-local.tar.gz into $GUPPI_HOME/ui"
+fi
+
+echo "── [5/7] nats-server + PostgREST binaries ──"
+# Both were staged in [1/7] (when absent from PATH); extract + install them here
+# as root. The command -v guards match stage_downloads, so a pre-installed
+# binary means nothing was staged and nothing is done.
+if ! command -v nats-server >/dev/null 2>&1; then
+  [ -f "$TMPD/nats.tar.gz" ] || fail "nats-server wasn't staged — re-run the installer."
+  tar -xzf "$TMPD/nats.tar.gz" -C "$TMPD"
+  install -m755 "$TMPD"/nats-server-*/nats-server /usr/local/bin/nats-server
+fi
+if ! command -v postgrest >/dev/null 2>&1; then
+  [ -f "$TMPD/postgrest.tar.xz" ] || fail "PostgREST wasn't staged — re-run the installer."
+  tar -xJf "$TMPD/postgrest.tar.xz" -C /usr/local/bin postgrest
+fi
+
+echo "── [6/7] Database + hub venv ──"
+$PSQL -qAt -c "SELECT 1 FROM pg_roles WHERE rolname='guppi'" | grep -q 1 \
+  || sudo -u postgres createuser -p "$PG_PORT" guppi
+$PSQL -qAt -c "SELECT 1 FROM pg_database WHERE datname='guppi'" | grep -q 1 \
+  || sudo -u postgres createdb -p "$PG_PORT" -O guppi guppi
+# Schema is idempotent (IF NOT EXISTS everywhere) so upgrades re-apply it
+# against the kept database. Suppress the "already exists, skipping" NOTICEs —
+# they're normal on every upgrade and read like something went wrong. env
+# must ride inside the sudo (sudo strips PGOPTIONS otherwise).
+sudo -u postgres env PGOPTIONS='-c client_min_messages=warning' \
+  psql -p "$PG_PORT" -q -d guppi \
+  -f "$GUPPI_HOME/src/packages/agent/infrastructure/schema/core.sql" \
+  -f "$GUPPI_HOME/src/packages/agent/infrastructure/schema/local.sql"
+$PSQL -qc "ALTER DATABASE guppi SET synchronous_commit = off;"
+$PSQL -qc "GRANT ALL ON SCHEMA public TO guppi; GRANT ALL ON ALL TABLES IN SCHEMA public TO guppi;" guppi
+
+# Local-socket auth, no passwords, and no dedicated system user: the operator
+# runs guppi-hub as themselves, so peer auth can't map them to the 'guppi' db
+# role — trust both guppi roles on the local socket for the guppi db only.
+# Matches the trusted-bench posture (the box's local users are the operators).
+PG_HBA=$($PSQL -qAt -c "SHOW hba_file;")
+if ! grep -q "guppi_authenticator" "$PG_HBA"; then
+  sed -i "1i local   guppi   guppi_authenticator   trust" "$PG_HBA"
+fi
+if ! grep -qE "^local +guppi +guppi +trust" "$PG_HBA"; then
+  sed -i "1i local   guppi   guppi   trust" "$PG_HBA"
+fi
+systemctl reload postgresql
+
+command -v uv >/dev/null 2>&1 \
+  || { fetch https://astral.sh/uv/install.sh -o "$TMPD/uv-install.sh" \
+       && env UV_INSTALL_DIR=/usr/local/bin sh "$TMPD/uv-install.sh" >/dev/null; } \
+  || fail "Couldn't install uv"
+
+# sync_venv: build a package dir's venv AS $RUN_USER, self-healing a poisoned
+# cache. `uv sync` can fail (flaky PyPI) or — worse — succeed yet hardlink a
+# partially-written wheel out of uv's per-user cache, leaving an unimportable
+# venv. On failure we purge that cache and rebuild once. Callers `rm -rf .venv`
+# AS ROOT first: a prior root-run venv can hold root-owned __pycache__ that
+# $RUN_USER can't unlink, and syncing over it leaves stale bytecode behind.
+# Every venv is also VERIFIED as $RUN_USER (never root) so we never write
+# root-owned bytecode into a user-owned tree in the first place.
+sync_venv() {  # $1=dir
+  local dir="$1"
+  ( cd "$dir" && sudo -u "$RUN_USER" uv sync --frozen --no-dev -q ) && return 0
+  # Retry once WITHOUT purging first: a transient PyPI/network blip is far more
+  # common than a poisoned cache, and a purge turns a 5s retry into a full
+  # re-download of every wheel.
+  echo "   uv sync failed — retrying once"
+  ( cd "$dir" && sudo -u "$RUN_USER" uv sync --frozen --no-dev -q ) && return 0
+  echo "   uv sync failed again — clearing the uv cache and rebuilding once"
+  sudo -u "$RUN_USER" uv cache clean >/dev/null 2>&1 || true
+  rm -rf "$dir/.venv"
+  ( cd "$dir" && sudo -u "$RUN_USER" uv sync --frozen --no-dev -q )
+}
+
+# build_venv: (re)build a package dir's venv and prove it imports. rm -rf .venv
+# FIRST (AS ROOT — a prior root-run venv holds root-owned __pycache__ $RUN_USER
+# can't unlink; and `uv sync --frozen` won't rewrite a stale editable .pth that
+# points sys.path at the wrong tree, carried in by an interrupted run or a stray
+# .venv in the tarball → `ModuleNotFoundError`). sync_venv self-heals a flaky
+# or poisoned-cache sync. Then VERIFY AS $RUN_USER (never root, so we never write
+# root-owned bytecode into a user tree): a sync can "succeed" yet hardlink a
+# partial wheel out of the cache, leaving an unimportable venv (e.g. `import idna`
+# → "No module named 'idna.package_data'") — purge the cache and rebuild once if
+# the import check fails.
+build_venv() {  # $1=dir  $2=verify-cmd (run in $dir as $RUN_USER)  $3=label
+  local dir="$1" verify="$2" label="$3" stamp
+  stamp=$(venv_stamp "$dir")
+  # A venv reused from src.prev (hardlink-copied after extraction, stamped
+  # against THIS tree's lockfiles) skips the multi-minute uv sync entirely —
+  # but only if it actually imports. Any failure falls through to the full
+  # rebuild below, so this can only save time, never correctness.
+  if [ -n "$stamp" ] \
+     && [ -f "$dir/.venv/.guppi-sync-stamp" ] \
+     && [ "$(head -n1 "$dir/.venv/.guppi-sync-stamp")" = "$stamp" ] \
+     && ( cd "$dir" && sudo -u "$RUN_USER" bash -c "$verify" ) >/dev/null 2>&1; then
+    echo "   $label venv: dependencies unchanged — reused previous venv (skipped uv sync)"
+    return 0
+  fi
+  rm -rf "$dir/.venv"
+  sync_venv "$dir" || fail "building the $label venv (uv sync) failed — re-run the installer."
+  if [ -n "$verify" ] && ! ( cd "$dir" && sudo -u "$RUN_USER" bash -c "$verify" ) >/dev/null 2>&1; then
+    echo "   $label venv built but won't import — clearing the uv cache and rebuilding once"
+    sudo -u "$RUN_USER" uv cache clean >/dev/null 2>&1 || true
+    rm -rf "$dir/.venv"
+    sync_venv "$dir" \
+      && ( cd "$dir" && sudo -u "$RUN_USER" bash -c "$verify" ) >/dev/null 2>&1 \
+      || fail "$label venv doesn't run even after a clean rebuild — re-run the installer."
+  fi
+  # Stamp the verified venv so the next upgrade can reuse it when the
+  # dependency set is unchanged (see the reuse block after extraction).
+  echo "$stamp" > "$dir/.venv/.guppi-sync-stamp"
+  chown "$RUN_USER:" "$dir/.venv/.guppi-sync-stamp"
+}
+# The tarball was extracted as root; uv sync (and the .venv it creates) run as
+# $RUN_USER, so the tree must be theirs before syncing.
+chown -R "$RUN_USER:" "$GUPPI_HOME"
+build_venv "$GUPPI_HOME/src/packages/agent" \
+  '.venv/bin/python -c "import fastapi, uvicorn, asyncpg, openhtf"' "hub/agent"
+
+# Values are QUOTED: guppi-hub sources this file in bash, and the DSN's '&'
+# would otherwise background half the line.
+cat > "$GUPPI_ETC/hub.env" <<EOF
+# Guppi hub — local mode is an explicit opt-in (never inferred).
+# Unix-socket DSN: hba-trusted local role 'guppi', no password.
+GUPPI_BACKEND="local"
+DATABASE_URL="postgresql://guppi@/guppi?host=/var/run/postgresql&port=$PG_PORT"
+GUPPI_DATA_DIR="$GUPPI_DATA"
+GUPPI_UI_DIR="$GUPPI_HOME/ui"
+EOF
+chown "$RUN_USER:" "$GUPPI_ETC/hub.env"; chmod 600 "$GUPPI_ETC/hub.env"
+
+# PostgREST: read-only web_anon over the local socket.
+cat > "$GUPPI_ETC/postgrest.conf" <<EOF
+db-uri = "postgres://guppi_authenticator@/guppi?host=/var/run/postgresql&port=$PG_PORT"
+db-schemas = "public"
+db-anon-role = "web_anon"
+server-host = "0.0.0.0"
+server-port = 3010
+db-max-rows = 10000
+# Single-user (local mode): PostgREST's default pool of 10 backends wastes Pi RAM.
+db-pool = 3
+EOF
+chown "$RUN_USER:" "$GUPPI_ETC/postgrest.conf"
+
+echo "── [7/7] guppi-hub launcher ──"
+# NOT a daemon, by design: one foreground command runs the whole bench —
+# NATS + PostgREST + the hub — with all logs in the terminal. Ctrl-C stops
+# everything. Closing the terminal stops it.
+cat > "$LAUNCHER" <<EOF
+#!/usr/bin/env bash
+# Guppi hub — runs the bench servers (NATS + PostgREST + hub) in the
+# FOREGROUND. Ctrl-C (or closing the terminal) stops everything.
+set -euo pipefail
+set -a; . $GUPPI_ETC/hub.env; set +a
+
+# ── Preflight: reap stale guppi servers before binding their ports ──────
+# guppi-hub isn't a daemon. If the last run was killed hard (terminal
+# closed, SSH dropped, power loss, SIGKILL) the trap below never fired and
+# its children linger holding 8000/9222/4222/3010 — the next launch then
+# can't bind. Reap OUR OWN leftovers (matched by their guppi-specific
+# command lines); refuse to stomp on anything else and say what holds it.
+pids_on_port() {   # PIDs LISTENing on TCP port \$1
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnHp "sport = :\$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u
+  else
+    lsof -tiTCP:"\$1" -sTCP:LISTEN 2>/dev/null | sort -u
+  fi
+}
+proc_cmd() { tr '\0' ' ' < /proc/"\$1"/cmdline 2>/dev/null; }
+is_guppi_proc() {   # true if pid \$1 is one of our servers
+  local cmd; cmd=\$(proc_cmd "\$1") || return 1
+  case "\$cmd" in
+    *"$GUPPI_HOME/src/packages/agent/.venv/bin/uvicorn"*) return 0 ;;
+    *nats/nats.dev.conf*)                                 return 0 ;;
+    *"postgrest $GUPPI_ETC/postgrest.conf"*)              return 0 ;;
+    *) return 1 ;;
+  esac
+}
+preflight_port() {   # name=\$1 port=\$2
+  local pid held=0
+  for pid in \$(pids_on_port "\$2"); do
+    held=1
+    if is_guppi_proc "\$pid"; then
+      echo "   reaping stale \$1 (pid \$pid) holding port \$2 from a previous run"
+      kill "\$pid" 2>/dev/null || true
+    else
+      echo "" >&2
+      echo "  ✗ port \$2 (\$1) is already in use by pid \$pid, which isn't a guppi process:" >&2
+      echo "      \$(proc_cmd "\$pid")" >&2
+      echo "    Stop that process (or free the port), then run guppi hub again." >&2
+      exit 1
+    fi
+  done
+  [ "\$held" = 1 ] || return 0
+  # Wait for the port to actually free; escalate to SIGKILL on our own PIDs.
+  local i
+  for i in \$(seq 1 10); do
+    [ -z "\$(pids_on_port "\$2")" ] && return 0
+    sleep 0.5
+  done
+  for pid in \$(pids_on_port "\$2"); do
+    is_guppi_proc "\$pid" && kill -9 "\$pid" 2>/dev/null || true
+  done
+  sleep 1
+}
+preflight_port nats-server 4222
+preflight_port nats-server 9222
+preflight_port postgrest  3010
+preflight_port hub        8000
+
+cd "$GUPPI_DATA"   # anchor NATS's relative .nats-data store dir
+/usr/local/bin/nats-server -c "$GUPPI_HOME/src/packages/agent/infrastructure/nats/nats.dev.conf" &
+NATS_PID=\$!
+/usr/local/bin/postgrest "$GUPPI_ETC/postgrest.conf" &
+PGRST_PID=\$!
+cd "$GUPPI_HOME/src/packages/agent"
+"$GUPPI_HOME/src/packages/agent/.venv/bin/uvicorn" app.main:app --host 0.0.0.0 --port 8000 &
+HUB_PID=\$!
+trap 'kill \$HUB_PID \$NATS_PID \$PGRST_PID 2>/dev/null; wait' INT TERM EXIT
+wait \$HUB_PID
+EOF
+chmod 755 "$LAUNCHER"
+
+# ── the `guppi` CLI ──────────────────────────────────────────────────────────
+# One real `guppi` on every machine — no dispatcher shim. This is the same
+# Python CLI laptops pipx-install; built here from the shipped tree (frozen
+# lock, same build_venv path as the agent venv above — including its import
+# verify + cache-purge-rebuild-once) and put onto PATH. Its `hub`/`rack`
+# subcommands exec the co-installed launchers.
+CLI_DIR="$GUPPI_HOME/src/packages/cli"
+build_venv "$CLI_DIR" '.venv/bin/guppi --help' "guppi CLI"
+write_guppi_wrapper "$CLI_DIR/.venv/bin/guppi"
+# Verify the binary users actually invoke — the one on PATH — not just the venv
+# path above. A stale /usr/local/bin/guppi pointing at a previous, now-deleted
+# venv would pass the check above yet fail for the user as
+# `ModuleNotFoundError: No module named 'guppi_cli'`. This catches that. Again
+# AS $RUN_USER so the verify never writes root-owned bytecode into the venv.
+sudo -u "$RUN_USER" /usr/local/bin/guppi --help >/dev/null \
+  || fail "/usr/local/bin/guppi doesn't run after install (stale symlink or unimportable guppi_cli) — re-run the installer."
+
+# Verify before claiming success: start the hub as the operator, wait for it
+# to answer, stop it. A failed upgrade rolls back to the previous tree.
+smoke_hub() {
+  local log="$1" pid ok=1
+  # shellcheck disable=SC2024  # root owning the smoke log is intended
+  sudo -u "$RUN_USER" "$LAUNCHER" >"$log" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 30); do
+    if hub_answers; then ok=0; break; fi
+    sleep 1
+  done
+  # Stop it — with escalation. A hub wedged in startup can ignore TERM's
+  # graceful shutdown indefinitely; don't let the installer hang on it.
+  kill "$pid" 2>/dev/null || true
+  for _ in $(seq 1 10); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+  kill -9 "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+  # Belt and braces: reap any guppi processes the launcher left behind
+  # (patterns are guppi-path-specific, nothing else matches them).
+  pkill -f "$GUPPI_HOME/src/packages/agent/.venv/bin/uvicorn" 2>/dev/null || true
+  pkill -f "$GUPPI_HOME/src/packages/agent/infrastructure/nats/nats.dev.conf" 2>/dev/null || true
+  pkill -f "postgrest $GUPPI_ETC/postgrest.conf" 2>/dev/null || true
+  sleep 1
+  return "$ok"
+}
+
+echo "   verifying: starting the hub once to check it answers…"
+if ! smoke_hub "$TMPD/hub-smoke.log"; then
+  echo "" >&2
+  tail -n 25 "$TMPD/hub-smoke.log" >&2 || true
+  if [ "$UPGRADING" = 1 ] && [ -d "$GUPPI_HOME/src.prev" ]; then
+    # Roll back to the previous tree (with its venv). The schema was already
+    # re-applied for the new version — schema changes are additive, so the
+    # old hub keeps working against it.
+    echo "" >&2
+    echo "✗ Upgraded hub didn't start — rolling back to $PREV_REF" >&2
+    rm -rf "$GUPPI_HOME/src"; mv "$GUPPI_HOME/src.prev" "$GUPPI_HOME/src"
+    if [ -d "$GUPPI_HOME/ui.prev" ]; then
+      rm -rf "$GUPPI_HOME/ui"; mv "$GUPPI_HOME/ui.prev" "$GUPPI_HOME/ui"
+    fi
+    # Rewrite the wrapper (harmless — it's absolute-pathed and tree-independent)
+    # and reverify against the restored tree's cli venv. The hub smoke below
+    # exercises only the agent venv, never the CLI, so a rolled-back box could
+    # otherwise leave `guppi` broken → ModuleNotFoundError.
+    write_guppi_wrapper "$GUPPI_HOME/src/packages/cli/.venv/bin/guppi"
+    sudo -u "$RUN_USER" /usr/local/bin/guppi --help >/dev/null \
+      || echo "✗ guppi CLI didn't run after rollback — re-run the installer" >&2
+    smoke_hub "$TMPD/hub-rollback.log" \
+      && echo "✓ Rollback verified — $PREV_REF starts. Run: guppi hub" >&2 \
+      || echo "✗ Rollback didn't start either — log: $GUPPI_ETC (re-run installer)" >&2
+    fail "Upgrade to $GUPPI_REF failed (rolled back). Hub log excerpt above."
+  fi
+  fail "Hub didn't answer on :8000 within 30s — log excerpt above."
+fi
+rm -rf "$GUPPI_HOME/src.prev" "$GUPPI_HOME/ui.prev"
+echo "$GUPPI_REF" > "$GUPPI_ETC/version"
+echo "   hub verified (started, answered on :8000, stopped)"
+
+IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+echo ""
+echo "✓ Guppi $GUPPI_REF installed."
+echo ""
+echo "  Start the bench (foreground — logs in your terminal, Ctrl-C stops it):"
+echo ""
+echo "    guppi hub                 # NATS + PostgREST + hub"
+echo ""
+echo "  Dashboard:  http://${IP:-<this-host>}:8000   (while the hub runs)"
+echo "  Bench:      curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh \\"
+echo "                | sudo bash -s -- rack"
+echo "              on the instrument machine, then run: guppi rack"
+echo "              (this box: same command — it finds the tree already here,"
+echo "               and the rack auto-claims over loopback, no code to type)"
+echo "  Upgrade:    stop the hub, then: guppi update"
+echo ""
+echo "  NOTE: nothing auto-starts on boot — after a reboot, run guppi hub again."
+if [ "$UPGRADING" = 1 ] && [ -x /usr/local/bin/guppi-rack ]; then
+  echo ""
+  if [ "${GUPPI_UPDATE:-0}" = 1 ]; then
+    # `guppi update` runs the rack installer next in the same run — the rack venv
+    # (which lived in the tree we just replaced) is about to be rebuilt. Say so
+    # rather than telling the operator to do it themselves.
+    echo "  NOTE: the tree was replaced — rebuilding the rack against it next…"
+  else
+    # Standalone `install.sh` (hub only): the rack venv is now dangling. Point at
+    # the one command that rebuilds BOTH in the right order and self-heals.
+    echo "  NOTE: the source tree was replaced and the rack venv with it."
+    echo "        Rebuild both with:  guppi update"
+    echo "        (or just the rack:  sudo bash /opt/guppi/src/packages/rack/install.sh)"
+  fi
+fi
