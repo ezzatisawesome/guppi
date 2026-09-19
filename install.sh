@@ -726,8 +726,12 @@ db-anon-role = "web_anon"
 server-host = "0.0.0.0"
 server-port = 3010
 db-max-rows = 10000
-# Single-user (local mode): PostgREST's default pool of 10 backends wastes Pi RAM.
-db-pool = 3
+# Pool sized for CONCURRENCY, not user count: one dashboard repaint fans out ~15
+# chart reads at once, and at db-pool=3 the tail 504'd with PGRST003 on every
+# reconnect/repaint (e.g. a rig reboot). 8 clears a typical fan-out; fail fast
+# past that so a saturated pool errors in 10 s instead of hanging the browser.
+db-pool = 8
+db-pool-acquisition-timeout = 10
 EOF
 chown "$RUN_USER:" "$GUPPI_ETC/postgrest.conf"
 
