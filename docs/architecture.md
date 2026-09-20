@@ -62,8 +62,8 @@ to the hub, which relays it to the rig over NATS request/reply.
 
 ## Rig identity is self-healing
 
-The source of truth for a rig's identity is the rack's pairing file
-(`~/.guppi/pairing.json`), not the hub's database row. Delete the row and
+The source of truth for a rig's identity is the rack's identity file
+(`~/.guppi/identity.json`), not the hub's database row. Delete the row and
 the rack simply re-registers with the same `rig_id` on next connect; history is
 keyed by `rig_id` and reattaches. Registration is idempotent, and nothing
 cascade-deletes from the rigs table into telemetry or executions.

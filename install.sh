@@ -558,8 +558,18 @@ tar -xzf "$TMPD/guppi-src.tar.gz" -C "$GUPPI_HOME/src" --strip-components=1
 # venv built on one interpreter must not be reused after a pin bump.
 venv_stamp() {
   [ -f "$1/pyproject.toml" ] && [ -f "$1/uv.lock" ] || return 0
-  { cat "$1/pyproject.toml" "$1/uv.lock"; cat "$1/.python-version" 2>/dev/null || true; } \
-    | sha256sum | cut -d' ' -f1 || true
+  { cat "$1/pyproject.toml" "$1/uv.lock"; cat "$1/.python-version" 2>/dev/null || true;
+    # The CLI package is COPIED into the venv at build time (hatchling
+    # force-include ships guppi_cli verbatim — even in the "editable" wheel),
+    # so unlike the .pth-linked agent/rack, a code-only release makes a reused
+    # venv WRONG, not just stale-stamped: v0.3.33/34 shipped a migrate fix that
+    # two upgrades silently never installed. Hash the package source too;
+    # editable trees have no guppi_cli dir and keep the cheap deps-only stamp.
+    if [ -d "$1/guppi_cli" ]; then
+      find "$1/guppi_cli" -type f \( -name '*.py' -o -name '*.pyc' \) -print0 \
+        | sort -z | xargs -0 cat 2>/dev/null
+    fi
+  } | sha256sum | cut -d' ' -f1 || true
 }
 if [ -d "$GUPPI_HOME/src.prev" ]; then
   for _pkg in agent cli rack; do

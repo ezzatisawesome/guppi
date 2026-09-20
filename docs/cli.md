@@ -10,11 +10,12 @@ config, then `http://localhost:8000`) and `--token TOKEN` (default:
 ## Running tests
 
 ```
-guppi run <test> [--rig R] [--dut SERIAL] [--step] [--resume-from PHASE] [-y]
+guppi run [<test>] [--rig R] [--dut SERIAL] [--step] [--resume-from PHASE] [-y]
 ```
 
 `<test>` is a saved test name (`tests/<slug>.py` in the rig workspace) or a
-path to a `.py` file. The CLI derives the plan, shows it, asks for approval,
+path to a `.py` file. Omit it to pick from the rig's saved tests (arrow-key
+menu, `1-9` jump). The CLI derives the plan, shows it, asks for approval,
 then runs — any `prompt()` in the script is answered inline in your terminal.
 
 - `--rig R` — which rig to run on (default: `GUPPI_RIG`, or the only paired rig).
@@ -33,15 +34,25 @@ guppi results [EXECUTION] [--rig R] [-o DIR]
 
 Writes a run bundle — `run.json`, `measurements.csv`, and captured waveforms
 under `scope/`. `EXECUTION` is an execution id (a prefix is enough); omit it
-for the latest run. `-o DIR` sets the output directory (default:
-`run-<date>-<id>/`).
+to pick from the recent runs (on a terminal — piped use takes the latest).
+`-o DIR` sets the output directory (default: `run-<date>-<id>/`).
 
 ## Bench control
 
 ```
 guppi abort [--rig R]      # stop the running test
-guppi rigs                 # list paired rigs
+guppi rigs                 # list rigs; with several, pick the default rig
+guppi control              # show who controls this bench and where data goes
+guppi control cloud        # hand the rack (and CLI) to Guppi Cloud
+guppi control local        # hand them back to the hub on this box
+guppi control <url>        # a self-host agent
 ```
+
+`guppi control` is the one switch for "local island or cloud": it repoints the
+rack's agent (`GUPPI_AGENT_URL` in `~/.guppi/config.env` — restart the rack to
+apply) and the CLI's hub (`~/.guppi/cli.json`) together. The rig keeps its
+identity across switches; pairings per agent are remembered, so flipping back
+needs no re-claim.
 
 ## Rig configuration (on the rack box)
 
