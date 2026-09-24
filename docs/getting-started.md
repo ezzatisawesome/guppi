@@ -42,8 +42,8 @@ guppi hub                 # NATS + PostgREST + hub, logs live in the terminal
 Ctrl-C (or closing the terminal) stops everything. Nothing auto-starts,
 including after a reboot: run `guppi hub` again.
 
-If you're on the bench box over SSH and want the bench to survive logging out, start
-it inside a terminal multiplexer you install yourself:
+To keep the bench running after you log out of SSH, start it inside a
+terminal multiplexer (install one first):
 
 ```
 sudo apt install tmux     # once

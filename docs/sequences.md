@@ -1,6 +1,6 @@
 # Buttons & sequences
 
-Dashboard buttons that run multi-step procedures against your rig — power-on
+Dashboard buttons that run multi-step procedures on your rig — power-on
 ramps, sweeps, protection checks — without writing a full test plan.
 
 Two kinds of button live on a dashboard:
@@ -33,7 +33,7 @@ rig.log("powered on");
 ```
 
 A syntax error disables the button and shows on its status line before you
-ever run. Scripts run in your browser; each `await rig.send(...)` resolves
+ever run. Scripts run in your browser. Each `await rig.send(...)` resolves
 after the rig has acted, so steps run strictly in order.
 
 ## The `rig` API
@@ -94,7 +94,7 @@ await rig.run("Protection Check");
 
 `rig.run` finds the button by its label, runs its script inline, prefixes its
 log lines, and shares one Stop — aborting anywhere ends the whole chain. Only
-one sequence runs at a time; calling a button that's already active in the
+one sequence runs at a time. Calling a button that's already active in the
 chain throws (ending the run unless you catch it), so a cycle can't sneak in.
 `Promise.all([rig.run("Load A"), rig.run("Load B")])` runs two buttons
 concurrently.
@@ -126,10 +126,10 @@ steps settling time.
 Sequence buttons are **two-step by default**: first press arms, second
 confirms (and it auto-disarms after a few seconds untouched). Set
 `variant: "instant"` to fire on a single click — only for procedures that are
-safe to trigger accidentally. Other options: `label` (the button text and
-`rig.run` name) and `hotkey` (a bare key that mirrors a click — `"space"`,
-`"s"`, `"f2"`; it arms and confirms just like clicking. `"p"` is taken by
-pause-display).
+safe to trigger accidentally. Two more options: `label` sets the button text
+(and the `rig.run` name); `hotkey` binds a bare key (`"space"`, `"s"`,
+`"f2"`) that arms and confirms exactly like a click. `"p"` is taken by
+pause-display.
 
 ## Not available in scripts
 

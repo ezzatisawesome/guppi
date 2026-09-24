@@ -27,8 +27,8 @@ The tables you care about:
 `telemetry` / `telemetry_points` are the **real samples** — every admitted
 sample, exactly as recorded. You may also notice `telemetry_rollup_*` tables:
 those are pre-computed min/max/mean summaries the charts use to stay fast at
-wide zooms. For analysis, query the raw tables — never the rollups — and
-you're guaranteed nothing was averaged or decimated on the way to you.
+wide zooms. For analysis, query the raw tables — never the rollups — so
+nothing you read was averaged or decimated.
 
 Example — one signal, last hour, as CSV:
 

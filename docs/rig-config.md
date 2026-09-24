@@ -1,8 +1,8 @@
 # Configuring your rig (`rig_config.yml`)
 
 The rack reads one YAML file at startup (default `rig_config.yml`, or the path in
-the `RIG_CONFIG_PATH` env var). It describes **what instruments are on the bench,
-how they connect, and what safety limits back them up**. Everything lives under a
+the `RIG_CONFIG_PATH` env var). It declares **the instruments on the bench, how
+they connect, and the safety limits that back them up**. Everything lives under a
 single top-level `rig:` key.
 
 ```yaml
@@ -39,8 +39,8 @@ entry has a `connection:` block.
 
 ### Shape 1 — rack-managed transport (standard SCPI instruments)
 
-The **rack** opens the connection, wraps it in a SCPI codec, and hands that to the
-driver. Use this for any bench instrument you talk to over VISA (USB/LAN/serial).
+The **rack** opens the connection and hands the driver a thread-safe SCPI codec.
+Use this for any bench instrument you talk to over VISA (USB/LAN/serial).
 
 ```yaml
 - id: psu1                       # required, unique (ids "system"/"execution"/"artifact" are reserved)
@@ -62,7 +62,7 @@ driver. Use this for any bench instrument you talk to over VISA (USB/LAN/serial)
 
 ### Shape 2 — driver-owned transport (CAN/I²C/SPI/HTTP boards, DUTs)
 
-No `connection:` block. The **driver instance owns its own link** — it opens,
+No `connection:` block. The **driver owns the link** — it opens,
 holds, and closes the connection itself inside `connect()`. The rack just
 constructs the driver with the leftover keys (matched to the driver's `__init__`
 parameters **by name**) and calls `connect()`.
@@ -102,18 +102,18 @@ A vendor-library device is the same shape — an MCC USB-1608G multifunction DAQ
 (`ai0`…`ai7`) — or an explicit **list** — `[0, 1, 5, 8, 12]` records exactly
 those physical channels, and the signals keep their channel numbers (`ai5`,
 `ai8`), so the name tracks your wiring. With `scan_rate` set the box can only
-sweep a *contiguous* channel range in one hardware scan, so a sparse list scans
-the whole span `min..max` and discards the unselected channels — meaning the
+sweep a *contiguous* channel range in one hardware scan: a sparse list scans
+the whole span `min..max` and discards the unselected channels, so the
 aggregate-rate ceiling counts that span, not just the chosen channels. Wire the
-channels you sample close together to keep the fast paths fast.
+channels you sample close together.
 
 With `scan_rate` set this device is a **buffered** source: it runs a continuous
 hardware-paced scan and hands the telemetry drain loop every sample stamped from
 the scan clock, so it captures at its own rate rather than the rack's poll rate.
 Analog outputs are discovered at connect (2 on a USB-1608GX-2AO, none otherwise).
 
-**Rule of thumb:** SCPI over USB/LAN/serial → Shape 1. Anything with its own
-protocol/framing → Shape 2.
+SCPI over USB/LAN/serial → Shape 1. Anything with its own protocol or
+framing (CAN, I²C, HTTP) → Shape 2.
 
 Any device key the loader doesn't recognize (`port`, `can_device`, `bitrate`,
 `channel_limits`, …) is passed straight to the driver, so driver-specific config
@@ -145,8 +145,8 @@ the resulting registry.
 
 You only need this for **out-of-tree** drivers. In-tree drivers (BK9130, Chroma,
 Keysight RP5900, ITECH IT-M3900C, SimPSU, …) are always available and need no
-entry. One driver class serves many device instances, so the code lives in one
-shared registry, referenced by `type:` — it is not nested under a device.
+entry. One driver class serves many device instances, so drivers live in a
+shared registry referenced by `type:`, not nested under a device.
 
 ```yaml
 drivers:
@@ -158,12 +158,11 @@ See [drivers.md](drivers.md) to write one.
 ## Networked instruments — `ethernet:`
 
 A LAN/LXI instrument often ships with a **fixed static IP on an arbitrary subnet**
-that the Pi's Ethernet port has no address on — so it's simply unreachable. The
-`ethernet:` block makes the rack bring itself onto those subnets automatically at
-boot: it ensures a route for declared `TCPIP` devices, passively sniffs the wire
-to hear instruments announce themselves, and adds a matching **add-only** IP alias
-per subnet. It never runs DHCP, NAT, or a gateway, and every alias is torn down on
-shutdown.
+the bench computer has no address on — unreachable until someone adds one. The
+`ethernet:` block makes the rack join those subnets itself at boot: it ensures a
+route for declared `TCPIP` devices, passively sniffs the wire for instrument
+announcements, and adds a matching **add-only** IP alias per subnet. It never runs
+DHCP, NAT, or a gateway, and every alias is torn down on shutdown.
 
 ```yaml
 ethernet:
@@ -186,9 +185,9 @@ On a sustained breach the watchdog, in order:
 2. **aborts** the running test (best-effort),
 3. emits `system.safety_tripped` and **latches** until cleared.
 
-It backstops *slow, sustained* faults (thermal, sustained over-limit) — its
-response is bounded by the sample cadence. **Fast faults are the instrument's own
-OCP/current-limit (L0)**, not this loop.
+It backstops *slow, sustained* faults (thermal, sustained over-limit); its
+response is bounded by the sample cadence. **Fast faults belong to the
+instrument's own OCP/current-limit (L0)**, not this loop.
 
 ```yaml
 safety:

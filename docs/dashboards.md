@@ -102,12 +102,12 @@ when you resume.
 On top of the curves, the view paints what happened: test **runs** (pass/fail
 bands — click one to focus its time range), recording **sessions**, rig
 **offline** spans, instrument **connect/disconnect** events, **captures**
-(scope shots as point-in-time markers), notes from `rig.annotate()`, and your
-own **markers** — Alt+click a plot to drop one, Alt+drag to span a region.
+(scope shots as point-in-time markers), and notes from `rig.annotate()`. Add
+your own **markers** with Alt+click; Alt+drag spans a region.
 
 When you type a formula in a plot legend, matching signal names are suggested
-as you type — pick one and the full signal reference is inserted for you, so
-you never hand-type a rig id.
+as you type — pick one and the full signal reference is inserted; you never
+hand-type a rig id.
 
 Plots autoscale as data flows; drag to pan, scroll to zoom, Shift+scroll to
 pan in time.

@@ -29,8 +29,8 @@ offline forever.
 
 ## What that means for you
 
-- **No logins on the bench.** Anyone on the LAN can view; anything that *does*
-  something — run a test, set a voltage — goes through the hub. The design
+- **No logins on the bench.** Anyone on the LAN can view; anything that
+  *changes state* — running a test, setting a voltage — goes through the hub. The design
   assumption is a trusted bench LAN.
 - **Browsers can't write.** The dashboard reads history through a role that
   physically cannot modify the database.
