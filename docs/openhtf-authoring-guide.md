@@ -249,7 +249,11 @@ phase's `finally` blocks execute, but **every later phase in `TEST_PHASES` is
 skipped — including a trailing teardown phase**. The same applies to a phase
 timeout (§8). So a standalone teardown phase is the *normal-completion*
 off-path only; the abort off-path is the `try/finally` inside the energizing
-phase itself. Two related facts: a guard trip (L1) de-energizes the rig
+phase itself. Keep that `finally` **short and per-op fault-tolerant** (wrap
+each de-energize call in its own `try/except`): if the run doesn't finish
+within ~10 s of an abort, the executor escalates by re-killing the phase
+thread every few seconds — a `finally` wedged in slow driver I/O gets
+interrupted too. Two related facts: a guard trip (L1) de-energizes the rig
 *before* aborting the run, so it doesn't depend on your `finally`; and a hard
 kill (SIGKILL, power loss) bypasses Python entirely — which is why L0
 hardware limits are non-negotiable.
@@ -385,8 +389,11 @@ with no retention cap, so **an abort at hour N leaves every point up to that
 instant in the record** — which makes telemetry, not a `capture_artifact` at
 the end of the phase, the right persistence for a long or abortable sweep
 (the artifact only exists if the phase reaches the `capture_artifact` call).
-Two consequences: keep helper/bookkeeping state **out** of point dicts
-(every key becomes a channel), and use `capture_artifact` for what it's for
+Three consequences: keep helper/bookkeeping state **out** of point dicts
+(every key becomes a channel); **name commanded and measured values
+differently** (`vout_set` vs `vout`) — point and values keys share one
+channel namespace, and a collision silently interleaves setpoint and
+readback on a single channel; and use `capture_artifact` for what it's for
 — compact, uniform series you want joined to the run as artifacts, from
 phases that complete.
 
