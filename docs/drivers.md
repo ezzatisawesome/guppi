@@ -3,10 +3,8 @@
 Guppi ships a large driver library — 200+ instruments across power supplies,
 electronic loads, DMMs, oscilloscopes, spectrum / network / signal analyzers,
 SMUs, function generators, lock-ins, magnet controllers, motion, photonics,
-temperature, and vacuum. They live under
-`packages/rack/src/devices/<category>/`; the one nearest your instrument is the
-best template. When your instrument isn't covered — or you want the rack to read
-a custom board — you write a driver: one Python class.
+temperature, and vacuum. When your instrument isn't covered — or you want the
+rack to read a custom board — you write a driver: one Python class.
 
 ## How the rack finds drivers
 
@@ -28,10 +26,12 @@ Four sources, merged in this order (later wins on name collisions):
      - "/home/me/my-board-firmware/tools/driver"
    ```
 
-At startup the rack logs `Loaded N driver(s) from config path: …` for each
-source that contributed. A driver class is picked up if it subclasses the
-rack's `Device` base and isn't abstract; classes whose name starts with `_`
-are treated as private shared bases and skipped.
+Drivers load at rack startup — after adding a `drivers:` entry or editing
+driver code, **restart `guppi rack`** to pick it up (there is no hot reload).
+The startup log prints a `Loaded N driver(s) from …` line for each source
+that contributed. A driver class is picked up if it subclasses the rack's
+`Device` base and isn't abstract; classes whose name starts with `_` are
+treated as private shared bases and skipped.
 
 ## Start from the right base
 
@@ -47,14 +47,37 @@ parts, not `Device` directly. Pick the closest fit:
 | `SweptAnalyzer` | swept-frequency analyzers (spectrum / network / signal) | the arm → sweep → fetch-trace contract with swept-trace artifacts |
 
 Subclass the family, fill in the SCPI specifics for your model, and the
-capture/streaming plumbing comes for free — every base has a working example
-next to yours under `packages/rack/src/devices/`.
+capture/streaming plumbing comes for free.
 
 **Scaffold one** with `make new-driver NAME=MyDevice` (add `KIND=psu` for a
 channel-instrument skeleton; the default `KIND=sensor` is a bespoke `Device`).
-It writes a ready-to-edit driver stub under `packages/rack/drivers/` (override
-with `DIR=`) and prints the `rig_config.yml` snippet to wire it in. The sections
+It writes a ready-to-edit driver stub (choose where with `DIR=`) and prints
+the `rig_config.yml` snippet to wire it in. The sections
 below show a driver from scratch on the raw `Device` base.
+
+## Multi-file drivers are package directories
+
+A driver that spans several files must ship as a **package directory** — an
+`__init__.py` exposing the driver class, siblings imported relatively — and
+the `drivers:` entry points at the directory:
+
+```
+my-board-driver/
+  __init__.py        # from .protocol import …; class MyBoard(Device): …
+  protocol.py
+  frames.py
+```
+
+Relative imports only work in the package form; a bare multi-file `.py` will
+fail to import its siblings. And don't wrap imports of real dependencies in
+`try/except` — a missing dependency should fail loudly at load, not surface
+later as a half-working device.
+
+If your driver needs a third-party library (`pyserial`, a vendor SDK), install
+it **into the rack's environment** — the driver runs inside the rack process,
+so a library installed anywhere else won't be found. For a properly
+distributed driver, declare it as a dependency of your package instead (see
+[Distributing a driver as a package](#distributing-a-driver-as-a-package)).
 
 ## A minimal driver
 
@@ -104,9 +127,11 @@ devices:
       timeout: 10.0
 ```
 
-That's a working, streaming instrument: the telemetry sampler polls
-`read_all()` (default: one `measure()` per declared signal) every tick and
-the dashboard charts `meter1.voltage`.
+That's a working, streaming instrument. Restart `guppi rack` and success
+looks like this: the startup scan lists the device, `meter1.voltage` appears
+in the signal catalog, and the dashboard can chart it. Under the hood the
+telemetry sampler polls `read_all()` (default: one `measure()` per declared
+signal) every tick.
 
 ## The pieces
 
@@ -153,8 +178,8 @@ A driver-owned device on USB (CDC-ACM/USB-serial) enumerates as
 plug/boot order, not by device.** Two USB instruments (say an ITECH supply and
 a Pololu I2C adapter) can swap numbers across a reboot or a replug, so a
 `port: /dev/ttyACM0` in config can silently point at the *wrong* instrument.
-On the bench this showed up as one driver grabbing another's port (field test
-§9): a NACK/timeout storm at best, two sessions corrupting one port at worst.
+On a real bench this shows up as one driver grabbing another's port: a
+NACK/timeout storm at best, two sessions corrupting one port at worst.
 
 Pin `port:` to the **stable per-device symlink** under `/dev/serial/by-id/`
 instead. That name is built from the device's vendor and serial number, so it
@@ -186,6 +211,97 @@ fast with an actionable "already in use" message instead of fighting over it.
 The guard catches a *colliding* pin; `by-id` prevents the collision in the
 first place. Auto-detect (leaving `port:` unset) can still grab a neighbour's
 port — always pin USB serial ports.
+
+## A driver-owned example — controlling an eval board
+
+The other shape in full: a buck-converter eval board that talks a simple
+ASCII protocol over USB serial. The driver owns the connection, reports two
+signals, and exposes two writable controls — a setpoint and an enable:
+
+```python
+import serial
+
+from devices.core.device import Device, DeviceCapability, DeviceSignal
+
+
+class BuckEval(Device):
+    """Eval board speaking `VOUT?` / `SET <mv>` / `EN 0|1` at 115200."""
+
+    category = "dut"
+
+    def __init__(self, port: str, baud: int = 115200):
+        self.port, self.baud = port, baud
+        self.ser: serial.Serial | None = None
+
+    def connect(self) -> None:
+        self.ser = serial.Serial(self.port, self.baud, timeout=1.0)
+
+    def disconnect(self) -> None:
+        if self.ser:
+            self.ser.close()
+
+    def __enter__(self):
+        self._cmd("EN 0")            # force a safe state before anything runs
+        return self
+
+    def _cmd(self, line: str) -> str:
+        self.ser.write(f"{line}\n".encode())
+        return self.ser.readline().decode().strip()
+
+    def signals(self) -> list[DeviceSignal]:
+        return [
+            DeviceSignal(name="vout", unit="V", label="Output voltage"),
+            DeviceSignal(name="fault", unit="", label="Fault flag"),
+        ]
+
+    def measure(self, name: str) -> float | None:
+        if name == "vout":
+            return float(self._cmd("VOUT?")) / 1000.0
+        if name == "fault":
+            return float(self._cmd("FAULT?"))
+        return None
+
+    def capabilities(self) -> list[DeviceCapability]:
+        return [
+            DeviceCapability(
+                name="set_vout",
+                param_schema={"value": {"type": "number", "minimum": 0.8, "maximum": 5.5}},
+                label="Set Vout",
+            ),
+            DeviceCapability(
+                name="set_enable",
+                param_schema={"enabled": {"type": "boolean"}},
+                label="Output enable",
+                energizing=True,     # the watchdog can now de-energize this board
+            ),
+        ]
+
+    def invoke(self, name: str, params: dict) -> None:
+        if name == "set_vout":
+            self._cmd(f"SET {int(params['value'] * 1000)}")
+        elif name == "set_enable":
+            self._cmd(f"EN {1 if params['enabled'] else 0}")
+        else:
+            raise ValueError(f"unknown capability {name!r}")
+```
+
+Wire it up — no `connection:` block; the `port` and `baud` keys land on
+`__init__` by name (pin the port, [see below](#pinning-usb-serial-ports-port--use-devserialby-id)):
+
+```yaml
+devices:
+  - id: buck1
+    name: "Buck eval board"
+    type: BuckEval
+    enabled: true
+    port: /dev/serial/by-id/usb-Acme_BuckEval_1234-if00
+```
+
+Restart `guppi rack` and you have `buck1.vout` charting live, a
+`buck1.set_vout` setpoint and `buck1.set_enable` toggle ready to drop on a
+dashboard, and — because the enable is marked `energizing` — a board the
+safety watchdog shuts off on any abort. Sequence buttons and OpenHTF tests
+drive the same two capabilities.
 
 ## Self-describing devices (DUTs)
 

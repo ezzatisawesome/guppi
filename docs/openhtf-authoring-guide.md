@@ -6,11 +6,8 @@ test author actually touches, safety layering, performance rules, and a deep
 section on driving the **Keysight MP4300 Solar Array Simulator as an irradiance
 source**.
 
-This is the practitioner's companion to the two canonical references it never
-supersedes:
-
-- `packages/rack/docs/test-authoring.md` — the script contract (source of truth)
-- `docs/public/drivers.md` — the driver/instrument layer
+This is the practitioner's companion to
+[Instrument drivers](drivers.md), which covers the driver/instrument layer.
 
 ---
 
@@ -28,8 +25,8 @@ There is no test registry and no framework subclass to inherit. The rack:
 4. Builds `htf.Test(*TEST_PHASES)` and calls `test.execute(...)`.
 5. Binds every configured rig device as an OpenHTF **plug** — a live, already
    connected driver instance shared across all phases.
-6. Streams a run-state document (phases, measurements, prompts, artifacts) to
-   NATS as it runs, and persists the final record to Postgres.
+6. Streams the run live to the dashboard (phases, measurements, prompts,
+   artifacts) as it runs, and persists the final record to your database.
 
 Key consequences you must design around:
 
@@ -65,12 +62,12 @@ run it from the dashboard's test panel or with `guppi run <name>` (a path to a
 Two runtime modes, transparent to the script:
 
 - **Local ("Pi") mode** — `agent` backend, LAN-only, no auth, no AI.
-- **Cloud mode** — `agent-cloud` backend, guppi.app auth, AI agent can drive and
+- **Cloud mode** — sign in at guppi.app; the AI agent can drive runs and
   answer prompts.
 
-The script you write is identical in both. The rack is outbound-only (dials out
-over NATS, never accepts inbound), so you never think about ports or IPs — a rig
-is addressed by `rig_id`.
+The script you write is identical in both. The rack is outbound-only (dials
+out, never accepts inbound), so you never think about ports or IPs — a rig is
+addressed by its rig id.
 
 ---
 
@@ -105,26 +102,12 @@ Three rules, and that's the whole contract:
    Building `htf.Test(*TEST_PHASES)` never *executes* a phase, so plan derivation
    is safe even off-hardware.
 
-### How binding works under the hood
+### What a plug actually is
 
-OpenHTF binds plugs by *class* and instantiates each with no args. Guppi's
-drivers are pre-built, connected instances owned by the server. The executor
-bridges this by synthesizing a zero-arg subclass whose `__new__` always returns
-the one shared instance:
-
-```python
-# packages/rack/src/sequencer/executor.py
-def _plug_class_for(driver):
-    return type(
-        f"{type(driver).__name__}Plug",
-        (type(driver),),
-        {"__new__": lambda cls: driver, "__init__": lambda self: None},
-    )
-```
-
-So inside your phase, `PSU` is the actual driver object — you call its Python
-methods directly (`PSU.set_voltage(1, 5.0)`), not through any RPC or capability
-indirection.
+Inside your phase, `PSU` is the live, already-connected driver object — you
+call its Python methods directly (`PSU.set_voltage(1, 5.0)`), not through any
+RPC or capability indirection. There is exactly one instance per device,
+shared across phases and runs.
 
 ---
 
@@ -352,8 +335,7 @@ former one left** (or make each phase re-establish what it needs).
 
 ## 9. The MP4300 Solar Array Simulator as an irradiance source
 
-This is the section you came for. The `KeysightMP4300` driver
-(`packages/rack/src/devices/psu/keysight_mp4300.py`) turns a Keysight MP4300
+This is the section you came for. The built-in `KeysightMP4300` driver turns a Keysight MP4300
 mainframe into a photovoltaic source your DUT (an MPPT charger, a power board,
 a bus converter) sees as a real solar array.
 
@@ -657,25 +639,26 @@ atomically validated against the module envelope, so an out-of-envelope
 ### 9.8 Pace a timed slew against a deadline, not a fixed sleep
 
 A slew that re-programs the curve once per second over a fixed duration must pace
-against an **absolute deadline**. Every `rig.send` is a blocking round-trip to the
-rack, so a fixed sleep *per step* adds to that latency rather than absorbing it:
+against an **absolute deadline**. Every device write is a blocking round-trip to
+the instrument, so a fixed sleep *per step* adds to that latency rather than
+absorbing it:
 
 ```python
-# WRONG — wall-clock = DURATION_S + Σ(send latency). With 2 channels
-# (2 sends/step) this ran a 300 s sweep in ~10 min (field test 2026-08-04).
+# WRONG — wall-clock = DURATION_S + Σ(write latency). With 2 channels
+# (2 writes/step) this can run a 300 s sweep in ~10 min on real hardware.
 for k in range(steps):
     apply_curve(k)
-    rig.sleep(STEP_S * 1000)
+    time.sleep(STEP_S)
 
 # RIGHT — latency is absorbed; total ≈ DURATION_S.
-t0 = Date.now()
+t0 = time.monotonic()
 for k in range(steps):
     apply_curve(k)
-    rig.sleep(t0 + (k + 1) * STEP_S * 1000 - Date.now())
+    time.sleep(max(0.0, t0 + (k + 1) * STEP_S - time.monotonic()))
 ```
 
-If a step's sends exceed `STEP_S` the sleep goes non-positive and the loop simply
-proceeds — the true floor is `steps × send-latency`, so raise `STEP_S` if that
+If a step's writes exceed `STEP_S` the sleep goes non-positive and the loop simply
+proceeds — the true floor is `steps × write-latency`, so raise `STEP_S` if that
 dominates. Note this changes *pacing only*: the curve values per step are
 unchanged, so the physical sweep is identical, just on schedule.
 
@@ -738,20 +721,8 @@ itself in the results.
 
 ---
 
-## Reference index
+## See also
 
-| Topic | File |
-|---|---|
-| Script contract (source of truth) | `packages/rack/docs/test-authoring.md` |
-| Executor / namespace / plug binding | `packages/rack/src/sequencer/executor.py` |
-| Sweep helpers | `packages/rack/src/sequencer/sweep.py` |
-| Run-state doc bridge | `packages/rack/src/sequencer/state_bridge.py` |
-| Plan derivation + validation | `packages/rack/src/sequencer/plan.py` |
-| Run-state / plan schema | `contracts/test-plan-schema.json` |
-| Driver base classes | `packages/rack/src/devices/core/device.py` |
-| Driver authoring | `docs/public/drivers.md` |
-| Rig config reference | `docs/public/rig-config.md` |
-| **MP4300 SAS driver** | `packages/rack/src/devices/psu/keysight_mp4300.py` |
-| Example tests | `packages/rack/examples/` |
-</content>
-</invoke>
+- [Instrument drivers](drivers.md) — the driver/instrument layer
+- [Configuring your rig](rig-config.md) — `rig_config.yml`, safety abort-limits
+- [CLI reference](cli.md) — `guppi run`, `--step`, `--resume-from`

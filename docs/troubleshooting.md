@@ -61,6 +61,15 @@ The installer is idempotent — fix the cause and re-run it. Common causes:
 - Claim code entered but "rig offline": the rack keeps retrying — give it ~10 s,
   then check the rack terminal for connection errors.
 
+## Rig is in the wrong place (cloud)
+
+- Paired a rig under the wrong organization, or under your personal account
+  instead of the team's? On the rigs overview in Guppi Cloud, hover the rig's
+  card and use the transfer arrow — move it to one of your other orgs, or
+  send it to another user by email (that also hands over pairing ownership).
+  History moves with the rig. Only the account that paired the rig can
+  transfer it — so if a teammate paired it, they run the transfer.
+
 ## Charts stop / data missing
 
 - Telemetry is retained indefinitely — history is never auto-deleted, so

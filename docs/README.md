@@ -16,6 +16,11 @@ upgrading (`guppi update`) and pinning a version.
   `guppi abort`.
 - [**CLI reference**](cli.md) — every `guppi` command and option on one page:
   running tests, exporting results, rig config checks, servers, update/uninstall.
+- [**Dashboards & data views**](dashboards.md) — build live monitoring and
+  control boards (readouts, plots, toggles, P&ID diagrams) and timeline
+  analysis views; signal formulas; working with the agent.
+- [**Buttons & sequences**](sequences.md) — scripted dashboard buttons: the
+  `rig` API, composing buttons with `rig.run`, prompts, recording, abort.
 - [**Writing tests**](openhtf-authoring-guide.md) — authoring OpenHTF test
   scripts to Guppi standards: the `TEST_PHASES` contract, measurements and
   limits, prompts, the three safety layers, declarative sweeps, and capturing
@@ -38,5 +43,6 @@ it with `make new-driver`, and drop it in via `rig_config.yml`.
 failures.
 
 ## Under the hood
-[**Architecture**](architecture.md) — how the single-box install fits together
-(hub, rack, NATS, Postgres).
+[**Architecture**](architecture.md) — how the single-box install fits together,
+and the guarantees you can rely on (offline forever, your data is yours,
+outbound-only rack).
