@@ -477,6 +477,26 @@ on a dashboard (each pairs with its `set_` capability by name), and — because 
 safety watchdog shuts off on any abort. Sequence buttons and OpenHTF tests
 drive the same two capabilities.
 
+### Running a driver outside the rack
+
+A driver-owned driver is just a Python module talking to a serial port, so
+it's handy to give it a `__main__` block (`python my_driver.py --help`) for
+bench bring-up without the rack. The only obstacle is the rack SDK import —
+guard *that specific import* so the module still loads standalone:
+
+```python
+try:
+    from devices.core.device import Device, DeviceCapability, DeviceSignal
+except ModuleNotFoundError:      # running outside the rack (bench CLI use)
+    Device = object
+    DeviceCapability = DeviceSignal = None
+```
+
+This is the one acceptable try/except import: it guards the *rack's own SDK*
+for standalone use, where the fallback is deliberate and total. Real
+third-party dependencies (`pyserial`, a vendor SDK) must still fail loudly —
+see above.
+
 ## Self-describing devices (DUTs)
 
 A board that reports its own signal catalog at runtime (e.g. over CAN) is

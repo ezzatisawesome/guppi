@@ -41,6 +41,16 @@ Key consequences you must design around:
   *before* the run starts. Put display truth in the measurement, never in prose.
 - **The trust surface is fixed.** Only the names in §3 are injected. Everything
   else is stock Python.
+- **The process is long-lived; only the namespace is fresh.** Each run is
+  `exec()`d in a fresh namespace, but inside the *same* rack interpreter.
+  Anything that escapes the namespace persists across runs: a background
+  thread you start survives an abort (and still holds its port next run),
+  and imported helper modules stay cached in `sys.modules`, so edits to a
+  sibling helper need a rack restart to take effect. Stop background work —
+  servers, threads, sockets — in the phase's `finally` (§6). A test *may*
+  open a listening port (the "outbound-only" claim in §1 is about the Guppi
+  service, not your OS), but it must close it in `finally` for the same
+  reason.
 
 ---
 
@@ -90,8 +100,13 @@ TEST_PHASES = [check_rail]
 
 Three rules, and that's the whole contract:
 
-1. **`TEST_PHASES`** — a module-level list of OpenHTF phase functions. That list
-   *is* the test. Nothing else is required.
+1. **`TEST_PHASES`** — a module-level **flat list of plain phase functions**.
+   That list *is* the test. Nothing else is required — and nothing else is
+   accepted: the plan validator derives the plan from phase names, so
+   `htf.PhaseGroup`, subtests, and OpenHTF teardown hooks fail validation
+   ("phase names differ") even though stock OpenHTF supports them. This is
+   why abort-safe cleanup is a `try/finally` inside the phase (§6), not a
+   framework teardown hook.
 2. **Bind hardware with `@htf.plug(NAME=DEVICE_ID)`** — the config device id,
    uppercased, is injected as a plug class. A device with `id: psu1` in
    `rig_config.yml` is available as `PSU1`; `id: load1` → `LOAD1`; `id: sas1` →
@@ -99,8 +114,12 @@ Three rules, and that's the whole contract:
    function.
 3. **Declare limits in `@measures`** — `.in_range(lo, hi)`, `.equals(x)`,
    `.with_units(units.VOLT)`, etc. The rack introspects these to derive the plan.
-   Building `htf.Test(*TEST_PHASES)` never *executes* a phase, so plan derivation
-   is safe even off-hardware.
+   Building `htf.Test(*TEST_PHASES)` never *executes* a phase — but getting
+   `TEST_PHASES` out of your file means **exec'ing the whole module**, so the
+   module *body* runs at plan derivation, off-hardware. Keep top-level code
+   side-effect free: no file I/O, nothing that can raise. A missing data file
+   read at module level fails plan derivation with an opaque load error;
+   deferred into a setup phase it fails there with a clean, named failure.
 
 ### What a plug actually is
 
@@ -122,7 +141,7 @@ The executor's `_build_script_namespace` injects exactly this and nothing more:
 | `PSU1`, `LOAD1`, … | — | bound device plug classes (uppercased config ids) |
 | `capture_artifact` | `(path, waveform, phase=None) -> ref` | publish a **uniform numeric series** by reference (a scope trace, or one metric of a sweep), stamped with the run's `execution_id`. `waveform` must be `{"v": [floats], "sample_rate": float, "t0"?: float, "unit"?: str}`; **only `v` is stored** (compact f32) and the axis is rebuilt from `(t0, sample_rate, n)`. Any dict lacking `"v"` raises `KeyError`. Raises if no artifact store is configured. |
 | `safe_shutdown` | `() -> None` | de-energize every output on the rig. Use in an L2 teardown phase. |
-| `arm_guard` | `(path, op, threshold, min_duration=0.0) -> ids` | arm a **run-scoped** watchdog abort-limit (L1). The run's teardown disarms exactly what it armed. |
+| `arm_guard` | `(path, op, threshold, min_duration=0.0) -> ids` | arm a **run-scoped** watchdog abort-limit (L1). The executor disarms exactly what it armed when the run ends — pass, fail, abort, or timeout (§6). |
 | `grid` | `(**axes) -> list[point]` | build a Cartesian setpoint matrix |
 | `sweep` | `(points, apply, measure, *, settle_s=0.0, on_point=None) -> rows` | drive the matrix: command → settle → measure |
 | `prompt` | `(text, kind="confirm") -> Any` | pause the phase and ask a human/agent |
@@ -130,6 +149,14 @@ The executor's `_build_script_namespace` injects exactly this and nothing more:
 `__builtins__` is present, so normal imports work (you can
 `from devices.psu.keysight_mp4300 import SasCurve` — see §9). Keep that power for
 data types and stdlib; don't reach around the injected safety vocabulary.
+
+Two more facts about the namespace: **`__file__` is set** to the script's
+path, so `Path(__file__).parent` finds data files shipped next to the test;
+and **the script's own directory is put on `sys.path`**, so a sibling helper
+module (`from orbit_parser import ...` next to your test) imports directly.
+Mind the flip side of that convenience: sibling imports are cached in
+`sys.modules` for the life of the rack process (§0), so after editing a
+helper you must restart `guppi rack` — re-running the test is not enough.
 
 ---
 
@@ -197,7 +224,7 @@ Never rely on software to catch a microsecond fault. Layer your protection:
 |---|---|---|
 | **L0** | the instrument's own current/OCP/OVP limit | set it *first* in your setup phase, or in `rig_config.yml` device kwargs |
 | **L1** | watchdog abort-limit — samples telemetry, de-energizes + latches on breach | `rig_config.yml` `safety.abort_limits`, or per-run `arm_guard(...)` |
-| **L2** | explicit de-energize on the way out | a teardown phase calling `safe_shutdown()` inside `finally` |
+| **L2** | explicit de-energize on the way out | `safe_shutdown()` in a `try/finally` **inside every phase that energizes** |
 
 Canonical shape of a phase that energizes:
 
@@ -216,10 +243,23 @@ def stress(test, PSU):
         safe_shutdown()                              # L2: de-energize no matter what
 ```
 
+**Why the `finally` must live inside the phase — abort semantics.** A manual
+abort raises an exception into the *currently running* phase's thread: that
+phase's `finally` blocks execute, but **every later phase in `TEST_PHASES` is
+skipped — including a trailing teardown phase**. The same applies to a phase
+timeout (§8). So a standalone teardown phase is the *normal-completion*
+off-path only; the abort off-path is the `try/finally` inside the energizing
+phase itself. Two related facts: a guard trip (L1) de-energizes the rig
+*before* aborting the run, so it doesn't depend on your `finally`; and a hard
+kill (SIGKILL, power loss) bypasses Python entirely — which is why L0
+hardware limits are non-negotiable.
+
 Notes:
 
-- **`arm_guard` is run-scoped.** It records the ids it armed and the run's
-  teardown disarms exactly those, so a guard doesn't leak into the next run.
+- **`arm_guard` is run-scoped and executor-disarmed.** It records the ids it
+  armed, and the **executor** disarms exactly those when the run ends —
+  in a `finally`, so it happens on pass, fail, abort, or timeout alike. A
+  guard never leaks into the next run and you never write disarm code.
   Persistent guards belong in `rig_config.yml`.
 - **Thresholds are signed** for bidirectional supplies. A regenerative supply
   sinking current reads negative — arm one limit per direction (e.g. `>`, `80`
@@ -250,6 +290,20 @@ def capture_transient(test, SCOPE):
 The waveform rides the artifact plane (compact f32 + summary stats), joined to
 the run by `execution_id`; it never bloats the result JSON. Reserve *polled*
 bench reads for the slow, precise tier (setpoints, NPLC-accurate DMM values).
+
+**Budget per-point SCPI cost in a paced sweep.** Driver methods are not
+equal. On the MP4300: a V or I read is one query each;
+`measure_power(ch)` is `measure_voltage() × measure_current()` (the
+mainframe has no power query), so asking for v, i, *and* p costs **four**
+queries with V and I each read twice — and not coherently. Read V and I
+once and compute `p = v * i` in the script (§9.6 does this). A
+`set_current_scale` is one write; a `set_sas_curve` reprogram is the most
+expensive per-point op — a four-command compound write plus `SYST:ERR?`
+drains before and after. Keep the per-step wall budget comfortably above
+the summed per-step SCPI cost (on a Pi driving two SAS channels with a
+curve reprogram per step, ~1 s steps overrun; ~5 s holds pace), and skip
+idempotent writes when the setpoint hasn't meaningfully moved (a small
+deadband on the swept variable).
 
 **The `capture_artifact` contract (know this exactly).** The helper accepts a
 single **uniform numeric series**, shaped like what `fetch_waveform()` returns:
@@ -321,6 +375,50 @@ that raises `KeyError: 'v'` (§7). Persist each metric as its own series.
   `grid`'s row-major order (first axis outer), and the swept setpoints are already
   captured per row in `rows[i]["point"]`.
 
+### Sweep points stream to telemetry as they happen
+
+`sweep` doesn't just return rows — as each point completes it **publishes
+every numeric key of the `measure()` return dict, and every key of the point
+dict, as live telemetry channels** (under a per-phase path). Non-numeric
+values are skipped (bools become 0/1). Telemetry is persisted continuously
+with no retention cap, so **an abort at hour N leaves every point up to that
+instant in the record** — which makes telemetry, not a `capture_artifact` at
+the end of the phase, the right persistence for a long or abortable sweep
+(the artifact only exists if the phase reaches the `capture_artifact` call).
+Two consequences: keep helper/bookkeeping state **out** of point dicts
+(every key becomes a channel), and use `capture_artifact` for what it's for
+— compact, uniform series you want joined to the run as artifacts, from
+phases that complete.
+
+### Long phases: the default timeout will kill your sweep
+
+**OpenHTF applies a default phase timeout of 180 s.** A phase that runs
+longer — any real sweep or replay — is terminated with outcome `TIMEOUT`,
+and a timed-out phase **skips all remaining phases exactly like an abort**
+(§6), so the in-phase `try/finally` is the cleanup path here too. Size an
+explicit timeout above the worst-case wall clock:
+
+```python
+@htf.PhaseOptions(timeout_s=N_POINTS * PER_POINT_BUDGET_S + 900)
+@htf.plug(SAS=SAS1)
+def orbit_replay(test, SAS):
+    ...
+```
+
+### Robustness on multi-hour runs
+
+Thousands of SCPI round-trips will include a few transient blips. The codec
+does **not** retry for you: a transport timeout raises (`pyvisa`'s
+`VisaIOError`; the transport resyncs the link, and after 4 consecutive
+timeouts drops and reopens the session), while a deterministic rejection —
+an invalid curve, an out-of-range setpoint — raises `ValueError`. Pattern
+that holds up: retry each SCPI call **once** after a short delay, never
+retrying `ValueError` (it will fail identically); on a read that fails even
+the retry, record a NaN gap and keep sweeping; abort only on ~5 *consecutive*
+failures (that's a real comms loss — raise, and let the phase `finally`
+de-energize). Your `arm_guard` watchdogs sample telemetry independently of
+the script, so L1 protection stays live while the script is retrying.
+
 ### Resuming a failed run
 
 A finished run can be re-run from a phase onward — the "resume from here" button
@@ -356,10 +454,20 @@ So there are two clean ways to drive irradiance, and you'll typically use both:
 1. **Current scale factor (fast irradiance knob).** `set_current_scale(ch, pct)`
    scales the *whole programmed curve's current* by 1–100 %. Program the curve
    once at full sun (100 %), then treat the scale percentage as **irradiance in
-   percent of STC**: 100 % = 1000 W/m², 20 % = 200 W/m². No curve re-validation,
-   just a single SCPI write — ideal for an irradiance sweep or a moving-cloud
+   percent of STC**: 100 % = 1000 W/m², 20 % = 200 W/m². A single SCPI write
+   with no re-validation — ideal for an irradiance sweep or a moving-cloud
    profile. Pair it with `set_voltage_scale(ch, pct)` to model the temperature
    axis (Voc/Vmp) independently.
+
+   **The scale factor has a floor.** Scaling current by X % also scales the
+   curve's dI/dV slope by X %, and the mainframe enforces a minimum slope of
+   0.01 A/V (§9.2) — so a valid full-sun curve becomes invalid below a
+   computable scale, and the mainframe silently keeps the old curve. Compute
+   the floor up front:
+   `min_scale_pct = 100 × 0.01 / ((isc − imp) / (voc − vmp))`. Below it,
+   either reprogram the full curve for that operating point (option 2) or
+   turn the output off — for typical panel curves the floor lands in the
+   low-tens of percent, well inside a dawn/dusk or eclipse profile.
 
 2. **Reprogram the full curve.** `set_sas_curve(ch, SasCurve(voc, isc, vmp, imp))`
    writes a new four-point curve atomically. Use this when you want physically
@@ -400,6 +508,23 @@ Python rather than having the mainframe silently reject it):
   check exists to catch.
 - Each of `Voc, Vmp, Isc, Imp` within the module max.
 - `Pmp = Vmp × Imp <= module p_max`.
+
+**Two more rules the mainframe enforces that `validate_sas_curve` does NOT
+check** (found on hardware — they surface only through the silent-rejection
+guard below):
+
+- **dI/dV slope bounds.** The slope between `(Vmp, Imp)` and `(Voc, 0)` —
+  `dI/dV = (Isc − Imp) / (Voc − Vmp)` — must satisfy
+  `0.01 A/V <= dI/dV <= 4.153892 A/V`. Too shallow is below the module's
+  minimum representable step; too steep exceeds its slew capability.
+- **Knee geometry.** `(Vmp, Imp)` must lie *above* the straight line from
+  `(0, Isc)` to `(Voc, 0)`: `Imp > Isc × (1 − Vmp/Voc)`. A knee on or below
+  that line is rejected.
+
+A curve that violates either is rejected with ERR while the old curve stays
+active — exactly the failure mode `set_sas_curve`'s error-drain raises on.
+Validate these two in your script before writing (they're two lines of
+arithmetic) rather than discovering them mid-run.
 
 **Silent-rejection guard.** Even after the client check, `set_sas_curve` drains
 `SYSTem:ERRor?` before and after the write and **raises if the mainframe logged a
@@ -547,18 +672,29 @@ def setup_array(test, SAS):
     htf.Measurement("min_harvest_ratio").in_range(0.85, 1.0),
 )
 def irradiance_sweep(test, SAS):
-    rows = sweep(
-        grid(irradiance_pct=[20, 40, 60, 80, 100]),
-        apply=lambda p: SAS.set_current_scale(CH, p["irradiance_pct"]),
-        measure=lambda p: {
-            "v": SAS.measure_voltage(CH),
-            "i": SAS.measure_current(CH),
-            "p": SAS.measure_power(CH),
+    def measure(p):
+        # Read V and I once each and derive P — measure_power() is V×I under
+        # the hood, so asking for all three costs 4 queries, V and I twice.
+        v = SAS.measure_voltage(CH)
+        i = SAS.measure_current(CH)
+        return {
+            "v": v, "i": i, "p": v * i,
             # Available max power at this irradiance = scaled Pmp of the curve.
             "p_avail": STC.pmp() * p["irradiance_pct"] / 100.0,
-        },
-        settle_s=0.3,   # SAS output settle + DUT MPPT re-track
-    )
+        }
+
+    try:
+        rows = sweep(
+            grid(irradiance_pct=[20, 40, 60, 80, 100]),
+            apply=lambda p: SAS.set_current_scale(CH, p["irradiance_pct"]),
+            measure=measure,
+            settle_s=0.3,   # SAS output settle + DUT MPPT re-track
+        )
+    finally:
+        # L2 *inside the energizing phase*: a manual abort raises into the
+        # running phase and SKIPS every later phase — including the teardown
+        # below — so this finally is the abort off-path.
+        safe_shutdown()
     # One uniform series per metric (§7); the irradiance axis rides (t0, sample_rate).
     for metric, unit in (("p", "W"), ("v", "V"), ("i", "A"), ("p_avail", "W")):
         capture_artifact(
@@ -576,15 +712,22 @@ def irradiance_sweep(test, SAS):
 
 @htf.plug(SAS=SAS1)
 def teardown(test, SAS):
-    safe_shutdown()   # de-energizes SAS (and everything else) via L2
+    # Normal-completion off-path ONLY: an abort (or phase timeout) skips this
+    # phase entirely — the sweep's finally above is the abort off-path (§6).
+    safe_shutdown()
 
 TEST_PHASES = [setup_array, irradiance_sweep, teardown]
 ```
 
 Why it's built this way:
 
-- **Curve programmed once, irradiance via scale** — one SCPI write per step, no
-  per-step curve re-validation, physically correct (Isc scales with irradiance).
+- **Curve programmed once, irradiance via scale** — one SCPI write per step,
+  physically correct (Isc scales with irradiance). Valid here because the
+  lowest step (20 %) stays above this curve's scale floor
+  (`100 × 0.01 / ((9.1 − 8.6)/(38.0 − 32.4)) ≈ 11 %` — §9.1); sweeping lower
+  would need per-point curve reprogramming or output-off below the floor.
+- **`safe_shutdown()` in the sweep phase's `finally`** — the abort off-path;
+  the trailing teardown phase only runs on normal completion (§6).
 - **`FAST_LOWC` compensation** chosen for an MPPT DC-DC input — prevents SAS-loop
   oscillation. Change to match your actual converter.
 - **`settle_s=0.3`** covers both the SAS output settle (~100 ms) *and* the DUT's
@@ -595,7 +738,7 @@ Why it's built this way:
   (`harvest_at_full_sun_w`, `min_harvest_ratio`) carry limits. `capture_artifact`
   stores a 1-D array, never a `{"rows": …}` matrix (§7).
 - **All three safety layers**: OCP/power-limit (L0), `arm_guard` on frame health
-  (L1), `safe_shutdown()` in a teardown phase (L2).
+  (L1), `safe_shutdown()` in the energizing phase's `finally` (L2).
 
 ### 9.7 Modeling irradiance *and* temperature together
 
@@ -705,8 +848,9 @@ goes through `capture_artifact` as its own uniform series
 (`{"v", "sample_rate", …}`), never a `{"rows": …}` matrix.
 
 Safety is layered, in order: an energizing phase sets L0 hardware limits
-first, arms an L1 `arm_guard`, and de-energizes in an L2 teardown `finally`
-or teardown phase. Sources always have voltage **and** current limits
+first, arms an L1 `arm_guard`, and de-energizes in an L2 `try/finally`
+inside the phase itself — an abort or phase timeout skips later phases, so
+a separate teardown phase is the normal-completion path only (§6). Sources always have voltage **and** current limits
 programmed, power-up order is explicit in every phase (source → DUT → sink,
 reversed on teardown), and actuations are proven by measurement — does
 current actually flow? — not by DUT status flags (§10).
