@@ -47,9 +47,81 @@ parts, not `Device` directly. Pick the closest fit:
 | `SweptAnalyzer` | swept-frequency analyzers (spectrum / network / signal) | the arm → sweep → fetch-trace contract with swept-trace artifacts |
 
 Subclass the family, fill in the SCPI specifics for your model, and the
-capture/streaming plumbing comes for free.
+capture/streaming plumbing comes for free. Everything you import lives in
+two modules: `devices.core.device` (`Device`, `ScpiInstrument`,
+`ChannelInstrument`, `DeviceSignal`, `DeviceCapability`, `EnumOption`,
+`Read`, `Sampling`) and `devices.core.codec` (`ScpiCodec`).
 
-**Scaffold one** with `make new-driver NAME=MyDevice` (add `KIND=psu` for a
+### What a `ChannelInstrument` subclass implements
+
+The base generates the per-channel signals and capabilities; you supply the
+per-channel SCPI:
+
+- `measure_voltage(channel)` / `measure_current(channel)` — measured values
+- `set_voltage(channel, voltage)` / `set_current(channel, current)` — setpoints
+- `get_output(channel)` / `set_output(channel, enabled)` — output state
+
+The base's `__init__(scpi, num_channels=None, channel_limits=None, ...)`
+takes the rack-managed codec first, like `ScpiInstrument`; a fixed-channel
+model can just pin `num_channels = 2` as a class attribute instead. A
+minimal single-channel electronic load:
+
+```python
+from devices.core.device import ChannelInstrument
+
+
+class AcmeEL300(ChannelInstrument):
+    device_type = "AcmeEL300"
+    idn_models = ("EL-300",)
+    num_channels = 1
+
+    def measure_voltage(self, channel):
+        return float(self.scpi.query("MEAS:VOLT?"))
+
+    def measure_current(self, channel):
+        return float(self.scpi.query("MEAS:CURR?"))
+
+    def set_voltage(self, channel, voltage):
+        self._validate_voltage(channel, voltage)
+        self.scpi.write(f"VOLT {voltage}")      # CV-mode level
+
+    def set_current(self, channel, current):
+        self._validate_current(channel, current)
+        self.scpi.write(f"CURR {current}")
+
+    def get_output(self, channel):
+        return self.scpi.query("INP?").strip() in ("1", "ON")
+
+    def set_output(self, channel, enabled):
+        self.scpi.write(f"INP {'ON' if enabled else 'OFF'}")
+```
+
+That's a full device surface — `1.voltage` / `1.current` telemetry, setpoint
+readbacks, and a watchdog-killable output toggle — from six methods. (The
+base generates capabilities for all six, so implement all of them — the
+`_validate_*` helpers enforce the per-channel `channel_limits` from config.)
+
+If your instrument has a *stateful* channel select (select once, then read),
+override `measure_channel(channel)` to select and read voltage, current, and
+output state inside one transaction — that's the per-tick hot path, and it
+turns three round-trips into one.
+
+Users can narrow any channel instrument from config with no driver code —
+the loader applies both keys after construction (`select_channels()`), so
+your `__init__` doesn't need to accept them:
+
+```yaml
+- id: psu1
+  type: BK9141
+  channels: [1, 2]      # expose only these channels (signals + controls)
+  poll_channels: 1      # stream telemetry for just a subset of those
+```
+
+`channels` takes an int or a list; `poll_channels` must be a subset of the
+exposed channels (writes still work on everything exposed).
+
+**Scaffold one** with `make new-driver NAME=MyDevice` — from a source
+checkout of the repo (add `KIND=psu` for a
 channel-instrument skeleton; the default `KIND=sensor` is a bespoke `Device`).
 It writes a ready-to-edit driver stub (choose where with `DIR=`) and prints
 the `rig_config.yml` snippet to wire it in. The sections
@@ -68,8 +140,13 @@ my-board-driver/
   frames.py
 ```
 
-Relative imports only work in the package form; a bare multi-file `.py` will
-fail to import its siblings. And don't wrap imports of real dependencies in
+Relative imports only work in the package form because of how the loader
+imports each shape: for a package directory it puts the *parent* directory
+on `sys.path` and imports the package by name, so `from .protocol import …`
+resolves; a bare `.py` is loaded as an isolated module with no `sys.path`
+change, so it cannot import a sibling file at all. A shared transport module
+(one adapter used by several chip drivers) therefore belongs inside the
+package, imported relatively. And don't wrap imports of real dependencies in
 `try/except` — a missing dependency should fail loudly at load, not surface
 later as a half-working device.
 
@@ -78,6 +155,9 @@ it **into the rack's environment** — the driver runs inside the rack process,
 so a library installed anywhere else won't be found. For a properly
 distributed driver, declare it as a dependency of your package instead (see
 [Distributing a driver as a package](#distributing-a-driver-as-a-package)).
+A driver can also declare
+`requires = (("uldaq", "daq"),)` — (module, extra) pairs — so a missing
+optional SDK is named up front at load rather than failing mid-import.
 
 ## A minimal driver
 
@@ -138,18 +218,89 @@ signal) every tick.
 **`signals()`** — declares what the device reports. Each `DeviceSignal` is a
 device-local name (`"temperature"`, `"1.voltage"` for channel instruments), a
 unit, and an optional label. The full path seen everywhere downstream is
-`{device_id}.{name}`.
+`{device_id}.{name}`. Optional metadata makes the UI smarter: `signal_type`,
+`direction`, `min`/`max` bounds, and for non-numeric signals `field_kind`
+(`"bool"` / `"enum"`) with `options` — a tuple of
+`EnumOption(token, code, label)` mapping the instrument's string tokens to
+the numeric codes that stream as telemetry.
+
+`signal_type` is a free-form hint that the catalog projects to two UI types:
+`"digital"`, `"output"`, `"bool"`, `"boolean"`, or `"state"` become
+**digital** (renderable as a toggle); anything else (`"voltage"`,
+`"current"`, `"temperature"`, …) is **analog** (readouts, bars, gauges,
+setpoints). `direction` gates controls: `"in"` (measured — the default) is
+always read-only, even if a matching write capability exists; use `"out"`
+(commanded) or `"bidir"` (measured *and* commandable) for anything a user
+should be able to set from the dashboard.
+
+Each signal also has a **read discipline** (`read=`): `Read.POLLED` (default
+— sampled every tick), `Read.SETTER_OWNED` (served from the write cache —
+programmed setpoints, no instrument query per tick), or `Read.ON_DEMAND`
+(never streamed — large vector tables fetched only when asked).
+`SETTER_OWNED` is what `ChannelInstrument` uses for its `*_setpoint`
+readbacks; on a raw `Device`, the equivalent is simply caching the last
+written value in `invoke()` and returning it from `measure()` — no
+instrument query per tick.
 
 **`measure(name)` / `read_all()`** — how values are read. Override
 `read_all()` when the instrument has a bulk query (one SCPI round-trip
-instead of one per signal) — it's the per-tick hot path.
+instead of one per signal) — it's the per-tick hot path. Two specialized
+variants: `read_all_timed()` returns each value stamped with its own
+acquisition moment (for high-rate drivers that read sequentially), and
+`drain()` is for buffered, self-clocking sources (CAN, DAQs) that accumulate
+samples on their own thread and hand them over in batches.
+
+**Read failures and quarantine** — how you fail matters. **Raising** from
+`measure()`/`read_all()` counts as a failed read: after 5 consecutive
+failures the device is quarantined — marked degraded, polled only every
+30 s (with a `reconnect()` attempt before each retry) — and it recovers
+automatically on the first successful read. **Returning `{}` or a partial
+dict is a healthy tick**: missing signals just aren't recorded, the failure
+counter resets, and polling continues at full cadence. So when the hardware
+is genuinely unreachable, *raise* — returning `{}` silently hides a
+disconnected device forever. Return a partial dict only when the device is
+healthy but some signals legitimately have no value this tick (e.g. a DUT
+that is intentionally unpowered).
 
 **`capabilities()` / `invoke(name, params)`** — writable controls (set a
 voltage, toggle an output). Each `DeviceCapability` declares a name and a
-JSON schema for its parameters. **If a capability can source power, set
-`energizing=True`** — the safety watchdog de-energizes a rig by invoking
-every energizing capability with `{"enabled": False}`, and it can only do
-that for capabilities that are marked.
+JSON schema for its parameters — a map of parameter name → schema fragment,
+as in the examples below. **If a capability can source *or sink* power (a
+supply output, a load input, a relay feeding a DUT), set `energizing=True`**
+— the safety watchdog de-energizes a rig by invoking every energizing
+capability with `{"enabled": False}`, and it can only do that for
+capabilities that are marked. That contract means an energizing capability
+must accept a boolean parameter named exactly `enabled`.
+
+### Pairing a capability with a signal (dashboard controls)
+
+The dashboard renders an editable control for a signal only when a
+capability with the **matching name** exists — otherwise the signal is
+read-only. Pairing is by naming convention on the last path segment:
+
+| Signal | Paired capability | Control | Params sent |
+| --- | --- | --- | --- |
+| digital `X` (direction `out`/`bidir`) | `set_X` | toggle | `{"enabled": bool}` |
+| analog `foo_setpoint` (`out`/`bidir`) | `set_foo` | numeric setpoint | `{"value": number}` |
+| enum field `mode` (`field_kind="enum"`) | `set_mode` | dropdown | `{"value": "<token>"}` |
+
+Dotted names normally pair on the leaf: `1.output` ↔ `1.set_output`,
+`P1_0.value` ↔ `P1_0.set_value`. A channel-less board's digital net may
+instead put `set_` right after the device id
+(`pb1.BATT1.EN` ↔ `pb1.set_BATT1.EN`) — the dashboard generates both
+candidates and uses whichever your driver actually declares. So to make a
+value editable you need all
+three pieces: a signal with `direction="out"` or `"bidir"`, a capability
+named `set_{leaf}` (with the `_setpoint` suffix stripped for setpoints), and
+the right parameter key in your `invoke()` — `enabled` for toggles, `value`
+for everything else. A toggle additionally requires the signal to project as
+digital (see `signal_type` above). `ChannelInstrument` follows all of these
+conventions for you.
+
+**`validate_config(cfg)`** — an optional `@classmethod` that rejects
+obviously-bad config values (a negative `num_channels`, an out-of-range
+frequency) with a clear error at `guppi rack config check` time and again at
+load, instead of a confusing failure at runtime.
 
 **Connected-state setup** — put initialization that needs a live connection
 (channel discovery, forcing a safe state) in `__enter__`. The server enters
@@ -161,7 +312,11 @@ the connection lifecycle.
 **Rack-managed (SCPI instruments)** — the device has a `connection:` block in
 config; the rack opens the transport (VISA/socket), wraps it in a
 thread-safe SCPI codec, and passes it as your `__init__`'s first argument.
-This is the `MyMeter` example above.
+This is the `MyMeter` example above. `connection.type` defaults to `visa`;
+a raw TCP instrument uses a VISA socket address
+(`TCPIP0::192.168.1.50::5025::SOCKET`), and any extra keys in the
+`connection:` block (e.g. `read_termination: "\n"`) are forwarded to the
+transport.
 
 **Driver-owned (everything else)** — no `connection:` block; your driver
 takes its own parameters (`port=`, `can_device=`, …) and opens whatever it
@@ -169,7 +324,12 @@ needs in `connect()`. Serial sensors, CAN boards, HTTP gadgets.
 
 In both shapes, extra keys in the device's config block are matched by name
 to your `__init__` parameters — declare `num_channels`, `bitrate`, or any
-custom knob as a keyword argument and users can set it in YAML.
+custom knob as a keyword argument and users can set it in YAML. Values
+arrive **verbatim with their YAML types** (no coercion): `address: 0x74`
+arrives as an int, `address: "0x74"` as a string — normalise in `__init__`
+(`int(x, 0)` handles both). Keys that match no parameter are silently
+ignored, so a typo'd knob won't error — double-check spelling against your
+signature.
 
 ### Pinning USB serial ports (`port:`) — use `/dev/serial/by-id/`
 
@@ -215,8 +375,9 @@ port — always pin USB serial ports.
 ## A driver-owned example — controlling an eval board
 
 The other shape in full: a buck-converter eval board that talks a simple
-ASCII protocol over USB serial. The driver owns the connection, reports two
-signals, and exposes two writable controls — a setpoint and an enable:
+ASCII protocol over USB serial. The driver owns the connection, reports
+measured signals, and exposes two dashboard-controllable pairs — a setpoint
+and an enable:
 
 ```python
 import serial
@@ -232,6 +393,7 @@ class BuckEval(Device):
     def __init__(self, port: str, baud: int = 115200):
         self.port, self.baud = port, baud
         self.ser: serial.Serial | None = None
+        self._vset: float | None = None
 
     def connect(self) -> None:
         self.ser = serial.Serial(self.port, self.baud, timeout=1.0)
@@ -252,6 +414,13 @@ class BuckEval(Device):
         return [
             DeviceSignal(name="vout", unit="V", label="Output voltage"),
             DeviceSignal(name="fault", unit="", label="Fault flag"),
+            # The controllable pair (see "Pairing a capability with a signal"):
+            # vout_setpoint + set_vout -> numeric field; enable (digital,
+            # bidir) + set_enable -> toggle.
+            DeviceSignal(name="vout_setpoint", unit="V", direction="out",
+                         label="Vout setpoint"),
+            DeviceSignal(name="enable", signal_type="output",
+                         direction="bidir", label="Enable"),
         ]
 
     def measure(self, name: str) -> float | None:
@@ -259,6 +428,10 @@ class BuckEval(Device):
             return float(self._cmd("VOUT?")) / 1000.0
         if name == "fault":
             return float(self._cmd("FAULT?"))
+        if name == "vout_setpoint":
+            return self._vset            # cached last write; no query per tick
+        if name == "enable":
+            return float(self._cmd("EN?"))
         return None
 
     def capabilities(self) -> list[DeviceCapability]:
@@ -279,6 +452,7 @@ class BuckEval(Device):
     def invoke(self, name: str, params: dict) -> None:
         if name == "set_vout":
             self._cmd(f"SET {int(params['value'] * 1000)}")
+            self._vset = params["value"]
         elif name == "set_enable":
             self._cmd(f"EN {1 if params['enabled'] else 0}")
         else:
@@ -286,7 +460,7 @@ class BuckEval(Device):
 ```
 
 Wire it up — no `connection:` block; the `port` and `baud` keys land on
-`__init__` by name (pin the port, [see below](#pinning-usb-serial-ports-port--use-devserialby-id)):
+`__init__` by name (pin the port — [see above](#pinning-usb-serial-ports-port--use-devserialby-id)):
 
 ```yaml
 devices:
@@ -298,8 +472,8 @@ devices:
 ```
 
 Restart `guppi rack` and you have `buck1.vout` charting live, a
-`buck1.set_vout` setpoint and `buck1.set_enable` toggle ready to drop on a
-dashboard, and — because the enable is marked `energizing` — a board the
+`buck1.vout_setpoint` numeric field and `buck1.enable` toggle ready to drop
+on a dashboard (each pairs with its `set_` capability by name), and — because the enable is marked `energizing` — a board the
 safety watchdog shuts off on any abort. Sequence buttons and OpenHTF tests
 drive the same two capabilities.
 
@@ -318,6 +492,13 @@ Telemetry sampling, test phases, and dashboard commands can hit a driver from
 different threads. The SCPI codec is thread-safe per call; for stateful
 multi-step operations (select a channel, then act on it), wrap the steps in
 `with self.scpi.transaction():` so they can't interleave.
+
+Beyond `query()` / `write()`, the codec gives you: `query_bytes()` /
+`read_bytes()` for binary block data (waveforms, screenshots), `clear()` to
+resynchronize after a framing glitch, and
+`with self.scpi.control_timeout(2.0):` to wrap per-tick reads in a short
+timeout — a hung instrument then fails in ~2 s instead of blocking the tick
+for the full transport timeout (10 s default).
 
 ## Distributing a driver as a package
 
@@ -339,18 +520,24 @@ AcmePSU = "guppi_driver_acme:AcmePSU"   # name = the rig_config `type:`
 `pip install guppi-driver-acme` into the rack's environment and it's discovered
 automatically — no `drivers:` path or `GUPPI_DRIVER_PATH` needed.
 
-## Checklist
+## Verifying a driver
 
-- [ ] Subclasses `Device` (directly or via a family base like
-      `ChannelInstrument`), name doesn't start with `_`
-- [ ] `device_type` (or class name) matches `type:` in config
-- [ ] `signals()` declares everything you report
-- [ ] Bulk `read_all()` override if the instrument supports one query
-- [ ] `energizing=True` on any capability that can source power
-- [ ] Connected-state init (discovery, safe state) in `__enter__`
-- [ ] Multi-step SCPI wrapped in `transaction()`
-- [ ] Loads cleanly: `GUPPI_DRIVER_PATH=path/to/driver guppi rack` shows it
-      in the startup scan
+The fastest loop while developing: point `GUPPI_DRIVER_PATH` at your file and
+start the rack —
+
+```
+GUPPI_DRIVER_PATH=path/to/driver guppi rack
+```
+
+Success looks like: the startup scan's `Loaded N driver(s)` line includes
+your source, the device appears in the scan with its signals, and each
+`{device_id}.{signal}` shows live values in the signal catalog and charts.
+If the class isn't picked up, check that it subclasses `Device` (directly or
+via a family base), isn't abstract, and doesn't start with `_`; if the device
+doesn't construct, check that `type:` in config matches `device_type` (or the
+class name). Before calling it done, confirm any power-sourcing capability is
+marked `energizing=True` — abort the rig from the dashboard and watch the
+output actually turn off.
 
 Instrument you'd rather not write a driver for?
 [Open an instrument request](https://github.com/ezzatisawesome/guppi/issues/new?template=instrument-request.yml)

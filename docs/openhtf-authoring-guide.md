@@ -695,29 +695,33 @@ itself in the results.
 
 ---
 
-## 11. Checklist — is this test "up to Guppi standards"?
+## 11. What "up to Guppi standards" means
 
-- [ ] `TEST_PHASES` is a module-level list of phase functions.
-- [ ] Every device bound with `@htf.plug(NAME=DEVICE_ID)`; ids match `rig_config.yml`.
-- [ ] Every pass/fail limit lives in an `@measures(...)` decorator, not in prose.
-- [ ] Measurements are scalar; each waveform/sweep metric goes through
-      `capture_artifact` as its own uniform series (`{"v", "sample_rate", …}`) —
-      never a `{"rows": …}` matrix.
-- [ ] Any energizing phase sets L0 hardware limits first, arms an L1 `arm_guard`,
-      and de-energizes in an L2 teardown `finally` / teardown phase.
-- [ ] Fast signals are captured from a hardware buffer, not polled in a loop.
-- [ ] Test matrices use `grid`/`sweep`, not hand-rolled nested loops.
-- [ ] Prompts appear only where a human is genuinely required.
-- [ ] Phases are resume-safe (a later phase can start from the state a former
-      one left, or re-establishes what it needs).
-- [ ] Power-up order is explicit in every phase (source → DUT → sink, reversed
-      on teardown); sources have voltage AND current limit programmed (§10).
-- [ ] Actuations are read back and state is proven by measurement, not by DUT
-      status flags (§10).
-- [ ] For the MP4300: mode → bandwidth → curve → protection → enable, in that
-      order; curves stay inside the per-slot module envelope; `set_sas_curve`
-      exceptions are trusted; `wait_operation_complete()` before dependent
-      readbacks; `frame_faulted`/`thermal_margin_c` watched on long runs.
+A finished test has `TEST_PHASES` as a module-level list of phase functions,
+every device bound with `@htf.plug(NAME=DEVICE_ID)` using ids that match
+`rig_config.yml`, and every pass/fail limit in an `@measures(...)` decorator
+rather than prose. Measurements stay scalar; each waveform or sweep metric
+goes through `capture_artifact` as its own uniform series
+(`{"v", "sample_rate", …}`), never a `{"rows": …}` matrix.
+
+Safety is layered, in order: an energizing phase sets L0 hardware limits
+first, arms an L1 `arm_guard`, and de-energizes in an L2 teardown `finally`
+or teardown phase. Sources always have voltage **and** current limits
+programmed, power-up order is explicit in every phase (source → DUT → sink,
+reversed on teardown), and actuations are proven by measurement — does
+current actually flow? — not by DUT status flags (§10).
+
+Structurally: fast signals come from a hardware buffer, never a polling
+loop; test matrices use `grid`/`sweep`, not hand-rolled nested loops;
+prompts appear only where a human is genuinely required; and phases are
+resume-safe — a later phase either works from the state a former one left or
+re-establishes what it needs.
+
+For the MP4300 specifically: configure mode → bandwidth → curve → protection
+→ enable, in that order; keep curves inside the per-slot module envelope;
+trust `set_sas_curve` exceptions; call `wait_operation_complete()` before
+dependent readbacks; and watch `frame_faulted` / `thermal_margin_c` on long
+runs.
 
 ---
 

@@ -1,15 +1,20 @@
 # Getting started
 
-From blank SD card to live telemetry on your bench.
+From blank machine to live telemetry on your bench.
 
-## 1. Prepare the Pi
+## 1. Prepare the bench computer
 
-- Flash **Raspberry Pi OS Lite 64-bit** (Debian bookworm) — Raspberry Pi Imager
-  is fine. Any arm64/amd64 Debian bookworm box also works.
-- Boot it, get it on your LAN (Ethernet recommended for the bench), and SSH in.
-- Give it a memorable hostname (`sudo raspi-config` → System → Hostname, e.g.
-  `bench`). You'll browse to `http://bench.local:8000` — the mDNS name survives
-  DHCP lease changes; a raw IP doesn't.
+Any 64-bit Debian-family Linux box works: **Debian** (bookworm or bullseye),
+**Ubuntu 20.04+**, or **Raspberry Pi OS Lite 64-bit**, on arm64 or amd64,
+running systemd. A Raspberry Pi 4/5 is the common choice, but a mini PC, an
+old laptop, or a VM on the bench network all work the same.
+
+- On a Pi: flash **Raspberry Pi OS Lite 64-bit** (Raspberry Pi Imager is
+  fine) — make sure it's the 64-bit image; 32-bit installs are rejected.
+- Get it on your LAN (Ethernet recommended for the bench) and SSH in.
+- Give it a memorable hostname (`sudo hostnamectl set-hostname bench`, or
+  `raspi-config` on a Pi). You'll browse to `http://bench.local:8000` — the
+  mDNS name survives DHCP lease changes; a raw IP doesn't.
 
 ## 2. Install the hub
 
@@ -37,7 +42,7 @@ guppi hub                 # NATS + PostgREST + hub, logs live in the terminal
 Ctrl-C (or closing the terminal) stops everything. Nothing auto-starts,
 including after a reboot: run `guppi hub` again.
 
-If you're on the Pi over SSH and want the bench to survive logging out, start
+If you're on the bench box over SSH and want the bench to survive logging out, start
 it inside a terminal multiplexer you install yourself:
 
 ```
