@@ -238,7 +238,7 @@ Each signal also has a **read discipline** (`read=`): `Read.POLLED` (default
 programmed setpoints, no instrument query per tick), or `Read.ON_DEMAND`
 (never streamed — large vector tables fetched only when asked).
 `SETTER_OWNED` is what `ChannelInstrument` uses for its `*_setpoint`
-readbacks; on a raw `Device`, the equivalent is simply caching the last
+readbacks; on a raw `Device`, the equivalent is caching the last
 written value in `invoke()` and returning it from `measure()` — no
 instrument query per tick.
 

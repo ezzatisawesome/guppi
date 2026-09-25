@@ -807,9 +807,9 @@ for k in range(steps):
     time.sleep(max(0.0, t0 + (k + 1) * STEP_S - time.monotonic()))
 ```
 
-If a step's writes exceed `STEP_S` the sleep goes non-positive and the loop simply
+If a step's writes exceed `STEP_S` the sleep goes non-positive and the loop
 proceeds — the true floor is `steps × write-latency`, so raise `STEP_S` if that
-dominates. Note this changes *pacing only*: the curve values per step are
+dominates. This changes *pacing only*: the curve values per step are
 unchanged, so the physical sweep is identical, just on schedule.
 
 ---
