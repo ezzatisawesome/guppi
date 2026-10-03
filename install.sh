@@ -400,10 +400,42 @@ GUPPI_WRAP
 # for the first minutes. Wait for it instead of dying.
 APT="apt-get -o DPkg::Lock::Timeout=180 -qq"
 
+# Name the process holding the dpkg frontend lock, straight out of /proc — no
+# `fuser`/`lsof` (psmisc isn't guaranteed on a trimmed Pi image, and a missing
+# binary would silently drop the one diagnostic this is here for). We are root,
+# so every /proc/<pid>/fd is readable.
+apt_note_lock() {
+  local fd pid holder=""
+  for fd in /proc/[0-9]*/fd/*; do
+    [ "$(readlink "$fd" 2>/dev/null)" = /var/lib/dpkg/lock-frontend ] || continue
+    pid=${fd#/proc/}; pid=${pid%%/*}
+    [ "$pid" = "$$" ] && continue
+    holder=$(cat "/proc/$pid/comm" 2>/dev/null || true)
+    [ -n "$holder" ] && break
+  done
+  [ -n "$holder" ] || return 0
+  echo "   waiting for the dpkg lock held by '$holder' (pid $pid, up to 180s)…"
+}
+
+# Every apt call here is quiet and discards stdout, so step [1/7] used to emit
+# ONE header line and then nothing for minutes — on a Pi the PostgreSQL install
+# alone takes 3-5 minutes, and a dpkg lock held by unattended-upgrades adds up
+# to 3 more. Operators (correctly) read total silence as a wedge and Ctrl-C'd a
+# working install. So: name each sub-step, say up front that it is slow, and
+# make a lock WAIT visible by naming the process that holds it.
+apt_step() {
+  local label="$1"; shift
+  echo "   $label…"
+  apt_note_lock
+  $APT "$@" >/dev/null
+}
+
 echo "── [1/7] System packages (PostgreSQL >= 15, curl, tar) ──"
+echo "   (this step is mostly apt — several minutes on a Pi, with long quiet stretches)"
 export DEBIAN_FRONTEND=noninteractive
+apt_note_lock
 $APT update || echo "   WARNING: apt-get update reported errors — continuing with cached package lists"
-$APT install -y curl ca-certificates tar xz-utils >/dev/null
+apt_step "installing curl, ca-certificates, tar, xz-utils" install -y curl ca-certificates tar xz-utils
 
 # Resolve the release ref and start pulling release assets in the BACKGROUND now
 # (curl/tar are in place), so the downloads overlap the PostgreSQL install +
@@ -424,15 +456,15 @@ stage_downloads & DOWNLOADS_PID=$!
 # the postgresql metapackage's debconf .config calls pg_lsclusters — which
 # isn't on PATH yet if postgresql-common is being unpacked in the same batch
 # (harmless but prints "pg_lsclusters: not found"). Splitting the calls fixes it.
-$APT install -y postgresql-common postgresql-client-common >/dev/null
-$APT install -y postgresql postgresql-client >/dev/null
+apt_step "installing postgresql-common" install -y postgresql-common postgresql-client-common
+apt_step "installing PostgreSQL (the slow one)" install -y postgresql postgresql-client
 
 # Distro PostgreSQL too old (Ubuntu 22.04 ships 14, bullseye 13)? Add the
 # official pgdg repo via the helper postgresql-common ships, install current.
 PG_MAJOR=$(psql --version | awk '{split($3,v,"."); print v[1]}')
 if [ "$PG_MAJOR" -lt 15 ]; then
   echo "   distro PostgreSQL is $PG_MAJOR — adding the official pgdg repo for a current version"
-  $APT install -y postgresql-common >/dev/null
+  apt_step "installing postgresql-common (for the pgdg helper)" install -y postgresql-common
   if [ -x /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh ]; then
     /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null \
       || fail "Couldn't add the pgdg apt repo. Add PostgreSQL >= 15 manually and re-run."
@@ -447,8 +479,9 @@ if [ "$PG_MAJOR" -lt 15 ]; then
     echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $CODENAME-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list
   fi
+  echo "   refreshing package lists from pgdg…"
   $APT update || true
-  $APT install -y postgresql-17 postgresql-client-17 >/dev/null
+  apt_step "installing PostgreSQL 17 from pgdg" install -y postgresql-17 postgresql-client-17
 fi
 systemctl enable --now postgresql >/dev/null
 
