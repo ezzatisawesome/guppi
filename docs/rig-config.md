@@ -60,6 +60,13 @@ Use this for any bench instrument you talk to over VISA (USB/LAN/serial).
     # raw ::SOCKET instruments that carry no framing of their own.
 ```
 
+One `type:` often covers a whole model family, not a single part number: the
+supplies in a series share a command set, so one driver serves all of them and
+reads the exact model from `*IDN?` at connect to apply that model's ratings. For
+example `type: BK9115` drives the **9115, 9115B, 9116, and 9117**. Auto-discovery
+(`guppi devices add`) picks the right driver for you; you only type `type:` by
+hand when writing config yourself — use the family driver name for any member.
+
 ### Shape 2 — driver-owned transport (CAN/I²C/SPI/HTTP boards, DUTs)
 
 No `connection:` block. The **driver owns the link** — it opens,
