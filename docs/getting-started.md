@@ -136,7 +136,17 @@ guppi rack deps list            # see the available extras
 `guppi rack config check` also preflights every enabled device's dependencies,
 so a missing extra is caught before boot with the exact fix — not as a runtime
 error at connect. (`libuldaq` is a C library that isn't on PyPI; the installer
-builds it, or see MCC's [uldaq releases](https://github.com/mccdaq/uldaq).)
+builds it when it sees an MCC device at install time, or see MCC's
+[uldaq releases](https://github.com/mccdaq/uldaq).)
+
+Building `libuldaq` by hand — e.g. the DAQ was plugged in after the install:
+
+```
+sudo apt-get install -y gcc g++ make bzip2 libusb-1.0-0-dev
+cd /tmp
+curl -fsSL https://github.com/mccdaq/uldaq/releases/download/v1.2.1/libuldaq-1.2.1.tar.bz2 | tar -xj
+cd libuldaq-1.2.1 && ./configure && make -j"$(nproc)" && sudo make install && sudo ldconfig
+```
 
 ## 4. Use it
 
