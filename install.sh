@@ -79,6 +79,35 @@ LAUNCHER=/usr/local/bin/guppi-hub
 # The operator owns and runs everything (like the rack): whoever invoked sudo.
 RUN_USER="${SUDO_USER:-root}"
 
+# ── Run-user guard ───────────────────────────────────────────────────────────
+# Everything below is built and owned by RUN_USER: the venvs, the launcher's
+# config path, ~/.guppi. Getting this wrong is silent and expensive — a
+# `sudo -i` / `sudo su` shell has no SUDO_USER, so RUN_USER resolves to root,
+# the venvs rebuild root-only ("bad interpreter: Permission denied" for the
+# real operator) and the launcher is repointed at /root/.guppi (the rack then
+# boots a different config). Refuse both shapes up front and name the fix.
+if [ "$RUN_USER" = root ] && [ -z "${GUPPI_RUN_USER:-}" ]; then
+  fail "Refusing to install as root: there's no bench operator to own the install.
+  This happens from a root shell ('sudo -i' / 'sudo su'), or from 'sudo guppi update'
+  on an older CLI (the CLI acquires sudo itself — run it WITHOUT sudo).
+  From your own login:     guppi update          (or: curl -fsSL <installer-url> | sudo bash)
+  Unattended / container:  GUPPI_RUN_USER=<operator>"
+fi
+RUN_USER="${GUPPI_RUN_USER:-$RUN_USER}"
+id -u "$RUN_USER" >/dev/null 2>&1 || fail "GUPPI_RUN_USER='$RUN_USER' is not a user on this box."
+# An install already owned by someone else: don't hijack it. (root-owned is the
+# damage this guard exists to repair, so that one IS taken over.)
+for __venv in /opt/guppi/src/packages/rack/.venv /opt/guppi/src/packages/cli/.venv; do
+  [ -d "$__venv" ] || continue
+  __owner=$(stat -c '%U' "$__venv" 2>/dev/null || stat -f '%Su' "$__venv" 2>/dev/null || echo root)
+  if [ "$__owner" != "$RUN_USER" ] && [ "$__owner" != root ]; then
+    fail "This box's guppi install belongs to '$__owner', but you're installing as '$RUN_USER'.
+  Run the installer / 'guppi update' from $__owner's login, or take it over on purpose:
+      sudo GUPPI_RUN_USER=$RUN_USER bash <installer>"
+  fi
+done
+unset __venv __owner
+
 # ── Component routing ───────────────────────────────────────────────────────
 # `... rack [args]` resolves the rack component and hands over to it entirely
 # (args pass through, so `rack --uninstall` works). Resolution order: a
@@ -373,9 +402,19 @@ write_guppi_wrapper() {
 # path; fall through to the repair message instead of hanging the box.
 __self=$(readlink -f "$0" 2>/dev/null || echo "$0")
 __target=$(readlink -f "$CLI_BIN" 2>/dev/null || echo "$CLI_BIN")
-if [ -x "$CLI_BIN" ] && [ "$__target" != "$__self" ]; then exec "$CLI_BIN" "$@"; fi
+# The entrypoint's shebang execs the venv python; if THAT isn't executable by us
+# (a venv built as root points its python at /root/.local/share/uv/…), exec dies
+# in the kernel with "bad interpreter: Permission denied" — a dead end with no
+# hint. Test the interpreter ourselves and fall through to the repair message.
+__py=$(readlink -f "$(dirname "$CLI_BIN")/python" 2>/dev/null || echo "")
+if [ -x "$CLI_BIN" ] && [ "$__target" != "$__self" ] && [ -n "$__py" ] && [ -x "$__py" ]; then
+  exec "$CLI_BIN" "$@"
+fi
 if [ "$__target" = "$__self" ]; then
   echo "guppi: CLI venv is broken (entrypoint points back at this wrapper)." >&2
+elif [ -x "$CLI_BIN" ] && { [ -z "$__py" ] || ! [ -x "$__py" ]; }; then
+  echo "guppi: CLI venv is broken — its python ($__py) isn't runnable by $(id -un)." >&2
+  echo "       (usually: an update was run from a root shell, so the venv was built for root)" >&2
 fi
 cmd="${1:-}"; [ $# -gt 0 ] && shift
 case "$cmd" in
@@ -386,8 +425,10 @@ case "$cmd" in
     if [ -x /usr/local/bin/guppi-rack ]; then exec /usr/local/bin/guppi-rack "$@"; fi
     echo "guppi: no rack installed on this box." >&2; exit 127 ;;
   *)
-    echo "guppi: the CLI isn't built ($CLI_BIN is missing)." >&2
-    echo "Repair it:  curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash" >&2
+    [ -x "$CLI_BIN" ] || echo "guppi: the CLI isn't built ($CLI_BIN is missing)." >&2
+    echo "Repair it from YOUR login with plain sudo (not 'sudo -i'):" >&2
+    echo "  curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash" >&2
+    echo "(rebuilds every venv for $(id -un), keeps ~/.guppi; it does the rack half too)" >&2
     exit 127 ;;
 esac
 GUPPI_WRAP
@@ -957,10 +998,12 @@ if [ "$UPGRADING" = 1 ] && [ -x /usr/local/bin/guppi-rack ]; then
     # rather than telling the operator to do it themselves.
     echo "  NOTE: the tree was replaced — rebuilding the rack against it next…"
   else
-    # Standalone `install.sh` (hub only): the rack venv is now dangling. Point at
-    # the one command that rebuilds BOTH in the right order and self-heals.
-    echo "  NOTE: the source tree was replaced and the rack venv with it."
-    echo "        Rebuild both with:  guppi update"
-    echo "        (or just the rack:  sudo bash /opt/guppi/src/packages/rack/install.sh)"
+    # Standalone `install.sh` (curl|bash, no `guppi update` driving it): the rack
+    # venv lived in the tree we just replaced and is now dangling. Don't tell the
+    # operator to run a second command — finish the job. The rack installer is
+    # in the tree we just verified; it inherits SUDO_USER so the run user matches.
+    echo "  NOTE: the tree was replaced — rebuilding the rack against it now…"
+    echo ""
+    exec bash "$GUPPI_HOME/src/packages/rack/install.sh"
   fi
 fi

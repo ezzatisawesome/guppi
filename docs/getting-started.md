@@ -108,17 +108,19 @@ same way as the hub.
 ### Drivers that need extra dependencies
 
 Most instruments (USB/VISA, serial, networked) work out of the box. A few driver
-families need an optional Python extra, and one needs a system library too:
+families need an optional Python extra, and one needs a C library too:
 
 | Hardware | Extra | Also needs |
 |----------|-------|------------|
 | USB-CAN adapters (CAN DUTs) | `can` | — (installed by default) |
-| MCC / Digilent USB DAQ (USB-1608G…) | `daq` | MCC **libuldaq** (built from source) |
+| MCC / Digilent USB DAQ (USB-1608G…) | `daq` | MCC **libuldaq** (prebuilt wheel; OS `libusb-1.0-0`) |
 
 The rack installer handles this automatically: if the hardware is plugged in
-when you run it, it detects the USB vendor, builds `libuldaq` from source when
-needed, and installs the matching extra into the **rack's own venv**. To opt in
-for hardware you'll plug in later, name the extras up front:
+when you run it, it detects the USB vendor, installs the matching extra into
+the **rack's own venv**, and for MCC DAQs drops in the prebuilt `guppi-libuldaq`
+wheel (Linux x86_64 / aarch64, macOS arm64 — no compiler, seconds). Only when no
+wheel fits the platform does it fall back to building `libuldaq` from source. To
+opt in for hardware you'll plug in later, name the extras up front:
 
 ```
 curl -fsSL …/install.sh | sudo GUPPI_RACK_EXTRAS=daq bash -s -- rack
@@ -126,20 +128,22 @@ curl -fsSL …/install.sh | sudo GUPPI_RACK_EXTRAS=daq bash -s -- rack
 
 Already running and hit `missing driver dependency … run 'guppi rack deps
 install <extra>'`? That command installs the extra into the rack's venv (not the
-CLI or hub venv — the three-venv trap it exists to avoid):
+CLI or hub venv — the three-venv trap it exists to avoid), and for `daq` fetches
+the prebuilt library wheel in the same step:
 
 ```
-guppi rack deps install daq     # then, for MCC DAQs, ensure libuldaq is built
+guppi rack deps install daq     # uldaq bindings + the prebuilt libuldaq wheel
 guppi rack deps list            # see the available extras
 ```
 
 `guppi rack config check` also preflights every enabled device's dependencies,
 so a missing extra is caught before boot with the exact fix — not as a runtime
-error at connect. (`libuldaq` is a C library that isn't on PyPI; the installer
-builds it when it sees an MCC device at install time, or see MCC's
-[uldaq releases](https://github.com/mccdaq/uldaq).)
+error at connect.
 
-Building `libuldaq` by hand — e.g. the DAQ was plugged in after the install:
+The wheel needs the OS `libusb-1.0` runtime (`libusb-1.0-0` on Debian /
+Raspberry Pi OS — present on every standard image; the installer checks). If
+there is no wheel for your platform (32-bit Raspberry Pi OS, for instance),
+build `libuldaq` by hand and the driver uses the system copy:
 
 ```
 sudo apt-get install -y gcc g++ make bzip2 libusb-1.0-0-dev
