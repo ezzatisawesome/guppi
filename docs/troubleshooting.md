@@ -15,6 +15,44 @@ background service).
 When filing a bug, include the release version (`cat /etc/guppi/version`) and
 the last screen of `guppi hub` output.
 
+## The rack's log
+
+The rack keeps a durable log at **`~/.guppi/logs/rack.log`** (5 MB, 3 rotations;
+override with `GUPPI_LOG_FILE`). The terminal stays quiet on purpose — it shows
+the self-check and pairing lines, not the play-by-play — so this file is where
+the narrative lives: links opening, devices identifying, instruments dropping
+out and coming back.
+
+Every line is stamped in **UTC, to the millisecond**, on the same clock as
+telemetry samples. So a gap in a chart can be looked up directly:
+
+```
+tail -f ~/.guppi/logs/rack.log
+grep 'quarantined' ~/.guppi/logs/rack.log       # when did instruments drop out?
+awk '$1 > "2026-10-08T14:30:00"' ~/.guppi/logs/rack.log
+```
+
+Note the times on a dashboard or data view are shown in your browser's local
+zone, while the log is UTC — convert before comparing.
+
+An instrument that goes dark is reported **once**, not once per reading, and
+once more when it comes back. If you want the full play-by-play (every SCPI
+exchange), run `guppi rack --verbose`; that goes to the terminal, not the file,
+because at a real poll rate it is gigabytes a day.
+
+Repetition is bounded for **every** logger, including a driver you wrote
+yourself: the first occurrence is logged in full, repeats inside a minute are
+dropped, and the next one through carries how many were suppressed —
+
+```
+... TMC4671 poll failed: no data [+412 more in the last 60s]
+```
+
+"The same message" means the same logger, level, and wording, with the same
+*identifying* values — a device id, address or command. Measurements don't
+count, so `psu1` at 24.5 Hz and then 25.1 Hz is one line, while `psu1` and
+`psu2` are always two. Anything with a traceback is never held back.
+
 ## Install failed partway
 
 The installer is idempotent — fix the cause and re-run it. Common causes:

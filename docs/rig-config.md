@@ -64,7 +64,7 @@ One `type:` often covers a whole model family, not a single part number: the
 supplies in a series share a command set, so one driver serves all of them and
 reads the exact model from `*IDN?` at connect to apply that model's ratings. For
 example `type: BK9115` drives the **9115, 9115B, 9116, and 9117**. Auto-discovery
-(`guppi devices add`) picks the right driver for you; you only type `type:` by
+(`guppi rack devices`) picks the right driver for you; you only type `type:` by
 hand when writing config yourself — use the family driver name for any member.
 
 ### Shape 2 — driver-owned transport (CAN/I²C/SPI/HTTP boards, DUTs)
@@ -126,9 +126,10 @@ Any device key the loader doesn't recognize (`port`, `can_device`, `bitrate`,
 `channel_limits`, …) is passed straight to the driver, so driver-specific config
 flows through without the loader needing to know about each driver.
 
-**Selecting channels.** Every channelised instrument (PSUs, electronic loads, and
-any driver built on the shared channel base) accepts two optional keys, applied by
-the loader regardless of the driver:
+**Selecting channels.** A *channelised* instrument (PSUs, electronic loads, and
+any driver built on the shared channel base — anything subclassing
+`ChannelInstrument`) accepts two optional keys, applied by the loader after the
+device is constructed:
 
 - `channels` — which channels this instance *exposes*. `[1, 3]` on a 3-output
   supply drops channel 2 from the whole surface: no `2.*` signals, no `2.set_*`
@@ -142,6 +143,14 @@ the loader regardless of the driver:
 Both take a count or an explicit list, validated in `guppi rack config check`.
 `channel_limits` stays indexed by physical channel, so selecting a subset doesn't
 change how you write it.
+
+These two keys only do something on a channelised driver. On anything else — a
+bespoke `Device`, which is what most custom drivers are — the loader reads them
+and then has nothing to apply them to, so they are silently inert. `guppi rack
+devices` therefore doesn't offer them on such a device at all, and a driver of
+your own that wants them must either subclass `ChannelInstrument` or declare its
+channels through `channel_choices()` (see
+[Writing a driver](drivers.md#selecting-channels-from-config)).
 
 ## Custom driver code — `drivers:`
 

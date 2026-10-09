@@ -98,8 +98,13 @@ You can skip the menu by setting the address up front:
 prints what it found. The rig appears in the dashboard within a few seconds of
 `guppi rack` starting. Your device layout lives in
 **`~/.guppi/rig_config.yml`** (in your home, so hub upgrades don't touch it and
-you can edit it without sudo) — see [drivers.md](drivers.md) to add an instrument, or use
-`guppi rack devices add` (guided wizard) and `guppi rack config check`.
+you can edit it without sudo) — but you shouldn't have to open it by hand.
+Run **`guppi rack devices`** on the rack box (it works over SSH): it scans the
+bench, adds what it finds, edits anything in place, and connects to the
+instrument to show you a real reading before it writes. See
+[the CLI reference](cli.md#rig-configuration-on-the-rack-box) for its keys,
+[drivers.md](drivers.md) to write a driver for something it doesn't know, and
+`guppi rack config check` to validate the file.
 
 Like the hub, `guppi rack` runs in the foreground (Ctrl-C to stop). To keep it
 running after an SSH logout, start it inside `tmux` (`tmux new -s rack`) the

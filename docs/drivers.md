@@ -106,6 +106,8 @@ override `measure_channel(channel)` to select and read voltage, current, and
 output state inside one transaction — that's the per-tick hot path, and it
 turns three round-trips into one.
 
+### Selecting channels from config
+
 Users can narrow any channel instrument from config with no driver code —
 the loader applies both keys after construction (`select_channels()`), so
 your `__init__` doesn't need to accept them:
@@ -119,6 +121,27 @@ your `__init__` doesn't need to accept them:
 
 `channels` takes an int or a list; `poll_channels` must be a subset of the
 exposed channels (writes still work on everything exposed).
+
+**This only applies to a `ChannelInstrument`.** The loader's `select_channels()`
+call sits behind an `isinstance` check, so on a bespoke `Device` the two keys are
+read from the entry and then dropped — they are inert, not merely ignored. The
+devices TUI matches that rule and leaves the rows off the form for such a driver
+(a value already in your YAML stays editable, flagged as ignored, so hiding the
+row can never rewrite it away).
+
+A driver-owned device that does its own channel selection can still get the
+tick-list picker by declaring what it has:
+
+```python
+@classmethod
+def channel_choices(cls, config):
+    from devices.core.device import ChannelSpec
+    return {"channels": ChannelSpec(values=[1, 2, 3, 4])}
+```
+
+`channel_choices` is asked on every keystroke with the entry as it currently
+stands, so a count or mode already typed can narrow the answer. It must not touch
+hardware. Declaring it is what turns a free-text list box into a picker.
 
 **Scaffold one** with `make new-driver NAME=MyDevice` — from a source
 checkout of the repo (add `KIND=psu` for a
