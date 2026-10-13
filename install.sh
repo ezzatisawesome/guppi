@@ -836,12 +836,31 @@ set -a; . $GUPPI_ETC/hub.env; set +a
 # its children linger holding 8000/9222/4222/3010 — the next launch then
 # can't bind. Reap OUR OWN leftovers (matched by their guppi-specific
 # command lines); refuse to stomp on anything else and say what holds it.
-pids_on_port() {   # PIDs LISTENing on TCP port \$1
+pids_on_port() {   # PIDs LISTENing on TCP port \$1 — ONLY the ones we can see
   if command -v ss >/dev/null 2>&1; then
     ss -ltnHp "sport = :\$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u
   else
     lsof -tiTCP:"\$1" -sTCP:LISTEN 2>/dev/null | sort -u
   fi
+}
+port_busy() {   # true if ANYTHING LISTENs on \$1, pid visible or not.
+  # Needed because ss/lsof only attribute PIDs to sockets we own: a leftover
+  # hub running as another user (e.g. root, from an earlier sudo run) shows
+  # up as a listening socket with no pid=, so pids_on_port comes back empty
+  # and the port looks free right up until uvicorn fails to bind.
+  if command -v ss >/dev/null 2>&1; then
+    [ -n "\$(ss -ltnH "sport = :\$1" 2>/dev/null)" ]
+  else
+    [ -n "\$(lsof -iTCP:"\$1" -sTCP:LISTEN 2>/dev/null)" ]
+  fi
+}
+port_blocked() {   # name=\$1 port=\$2 — bail out, naming who to ask
+  echo "" >&2
+  echo "  ✗ port \$2 (\$1) is in use by a process this user can't see —" >&2
+  echo "    most likely a guppi server left behind by a run as another user (root?)." >&2
+  echo "    Find it with:  sudo ss -ltnp \"sport = :\$2\"" >&2
+  echo "    Stop it, then run guppi hub again." >&2
+  exit 1
 }
 proc_cmd() { tr '\0' ' ' < /proc/"\$1"/cmdline 2>/dev/null; }
 is_guppi_proc() {   # true if pid \$1 is one of our servers
@@ -868,17 +887,25 @@ preflight_port() {   # name=\$1 port=\$2
       exit 1
     fi
   done
-  [ "\$held" = 1 ] || return 0
+  # Nothing of ours on it, but still occupied => a holder we can't attribute.
+  [ "\$held" = 1 ] || { port_busy "\$2" && port_blocked "\$1" "\$2"; return 0; }
   # Wait for the port to actually free; escalate to SIGKILL on our own PIDs.
   local i
   for i in \$(seq 1 10); do
-    [ -z "\$(pids_on_port "\$2")" ] && return 0
+    if [ -z "\$(pids_on_port "\$2")" ]; then
+      port_busy "\$2" && port_blocked "\$1" "\$2"   # a second, invisible holder
+      return 0
+    fi
     sleep 0.5
   done
   for pid in \$(pids_on_port "\$2"); do
     is_guppi_proc "\$pid" && kill -9 "\$pid" 2>/dev/null || true
   done
   sleep 1
+  # Still held after SIGKILLing everything we own: say so now rather than
+  # letting the server below die on a bare "address already in use".
+  port_busy "\$2" && port_blocked "\$1" "\$2"
+  return 0
 }
 preflight_port nats-server 4222
 preflight_port nats-server 9222
