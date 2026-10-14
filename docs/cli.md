@@ -61,18 +61,18 @@ needs no re-claim.
 
 ```
 guppi login [--email E] [--password]     # sign the CLI in to the hub
-guppi import [--since DATE] [--dry-run]  # copy local bench history to the cloud
+guppi migrate [--since DATE] [--dry-run] # copy local bench history to the cloud
 guppi unpair [--yes]                     # un-pair this rig from your account
 ```
 
 - `guppi login` — magic-link by default (check your email, then paste the
   6-digit code or the link back into the terminal). Add `--password` to be
   prompted for a password instead. The token is cached in `~/.guppi/cli.json`.
-- `guppi import` — migrates telemetry and runs from the local bench database
+- `guppi migrate` — migrates telemetry and runs from the local bench database
   to Guppi Cloud. Works without pairing the rig first; pairing later adopts
   the same history. Progress commits per batch, so Ctrl-C is safe and a
   re-run resumes where it left off. Useful flags: `--since`, `--batch`,
-  `--dry-run`. (`guppi migrate` is the same command, older name.)
+  `--dry-run`. (`guppi import` is the same command, other name.)
 - `guppi unpair` — removes the rig from your account. History is kept; only
   the account that paired the rig can unpair it.
 
