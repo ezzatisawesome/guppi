@@ -20,7 +20,11 @@ The tables you care about:
 | `telemetry_points` | **start here** — one row per sample: `recorded_at` (timestamp), `value`, `path` (e.g. `psu1.1.voltage`), `unit`, `rig_id` (plus `device_id`, `text_value` for string signals, and a few more) |
 | `telemetry` | the compact frame storage behind that view — one row per frame with samples packed into arrays, addressed by `channel_id`. Query `telemetry_points` unless you know you want frames |
 | `telemetry_channels` | one row per signal: `channel_id` ↔ `rig_id` + `device_id` + `path` + `unit` |
-| `test_executions` | every test run: status, timestamps, full result document (`result_json`) |
+| `test_executions` | every test run: status, timestamps, full result document (`result_json`). A deleted run stays as a marker (`deleted_at` set) — filter `WHERE deleted_at IS NULL`. If someone changed a run's times, the edit is in `started_at_edit` / `completed_at_edit`; the run's times as shown are `COALESCE(started_at_edit, started_at)` (and likewise for `completed_at`) |
+| `run_tags` | tags on runs, keyed by run id (`exec:<execution_id>` or `rec:<rig_id>:<start ms>`) |
+| `recordings` | named recordings: `name`, `started_at` / `ended_at` (empty while recording), edited times in `started_at_edit` / `ended_at_edit`, `deleted_at` marker. Older recordings exist only as `system.session` points in `telemetry_points` |
+| `run_shares` | runs shared by link: `token` (the link), `run_id`, the view it shows (`doc_path` + `doc_org_id` or `doc_rig_id`), `created_by`, `revoked_at` once turned off |
+| `rig_offline_periods` | when each rig was offline: `offline_from` (its last heartbeat), `offline_to` (first beat back; empty while still off) |
 | `artifacts` | captured waveforms: metadata + `storage_path`; bytes live under `/var/lib/guppi/artifacts` |
 | `rigs` | paired rigs |
 

@@ -12,7 +12,7 @@ upgrading (`guppi update`) and pinning a version.
 - [**Getting started — Use it**](getting-started.md#4-use-it) — the live
   dashboard, the data viewer, and running tests.
 - [**Run tests from your terminal**](getting-started.md#5-run-tests-from-your-terminal-optional)
-  — the `guppi` CLI: `guppi rigs`, `guppi run <test>`, `guppi results`,
+  — the `guppi` CLI: `guppi rigs`, `guppi run <test>`, `guppi runs`,
   `guppi abort`.
 - [**CLI reference**](cli.md) — every `guppi` command and option on one page:
   running tests, exporting results, rig config checks, servers, update/uninstall.

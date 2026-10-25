@@ -7,10 +7,10 @@ Two kinds of live document, both plain JSON files in your rig workspace:
 - **Data views** (`data-views/*.json`) — timeline analysis: signal history on a
   shared clock with runs, sessions, and markers painted on top.
 
-Both can live in any folder — they're recognized by their content, addressed
-by path. You can build them by hand in the editor, or just describe what you
-want to the Guppi agent — it builds and edits boards for you, and your manual
-edits survive its updates.
+Keep them in those two folders: the folder is what makes a file a dashboard
+or a data view, and the page lists only look there. Build them by hand in the
+editor, or have a coding agent write them (see
+[Building with a coding agent](#building-with-a-coding-agent)).
 
 ## Building a dashboard
 
@@ -18,23 +18,44 @@ Create one from the workspace (**+ New Dashboard**), then hit **Edit** in the
 toolbar. Drag blocks from the palette onto the canvas, drag to move, drag
 edges to resize. ⌘Z / ⌘⇧Z undo and redo; ⌘S (or **Done**) saves.
 
+**Selecting several blocks.** Shift-click adds a block (or a P&ID pipe) to the
+selection, or takes it out. Shift-drag on empty board draws a box: it picks
+every block it touches, and inside a P&ID panel, the symbols it fully encloses.
+⌘A selects everything; Esc or a plain click goes back to one block. Drag any
+selected block to move the whole selection.
+
+**Copy and paste.** ⌘C / ⌘X / ⌘V / ⌘D and Delete act on the whole selection.
+The copy goes through the system clipboard, so it pastes into another
+dashboard or another tab. Pasted blocks keep their layout and their signal
+bindings, and pipes come along when both ends were copied. With nothing
+selected, a paste lands in view; with a block selected, it lands beside it,
+or inside it if it's a panel.
+
 A dashboard is a tree: containers arrange, leaves bind one signal each.
 
-**Containers** — `canvas` (grid-placed blocks, pannable), `panel` (titled box),
-`stack` / `row` / `grid` (vertical / horizontal / multi-column flow), `tabs`,
-`section` (collapsible), `table` (test-result matrix).
+**Containers** — `canvas` (grid-placed blocks, pannable), `panel` (titled box;
+`fill` sets its background, and a dark one makes an instrument face), `stack` / `row` / `grid` (vertical / horizontal / multi-column flow),
+`tabs`, `table` (channel rows).
 
 **Leaves** bind a signal with `read` (and `write` for controls) and style
 themselves from the signal's metadata — unit, min/max, analog vs digital:
 
 | Group | Types |
 |---|---|
-| Readouts | `readout` (value + sparkline), `sparkline`, `waveform` (big plot), `stat`, `bar`, `progress`, `gauge` |
-| Digital | `status_dot`, `led_bank`, `annunciator` (alarm tiles) |
-| Controls | `toggle`, `button`, `setpoint`, `slider`, `dial`, `select`, `text_input` |
-| Scripts | `sequence` — a scripted multi-step button ([Buttons & sequences](sequences.md)) |
-| Media | `trace` (scope waveforms), `media` (camera stream / latest capture / URL), `xy_plot` (I-V curves), `orientation` (3D attitude), `matrix` |
-| Annotations | `note`, `label` |
+| Values | `readout` (`size` sm / md / lg for a big number, `trend: true` for a sparkline), `bar` (`percent`, `variant: "vertical"`), `waveform` (big plot) |
+| Digital | `indicator` — `style` dot (LEDs), tile (alarm tiles) or chip (status tags) |
+| Controls | `toggle`, `button` (give it a `script` for a multi-step button — [Buttons & sequences](sequences.md)), `setpoint` (`variant` stepper / slider / fader / dial), `select` |
+| Media | `media` (camera stream / latest capture / URL), `xy_plot` (I-V curves) |
+| Text | `label` (a banner, or `variant: "note"` for markdown) |
+| More | `trace` (scope waveforms), `matrix`, `orientation` (3D attitude), `text_input` |
+
+`readout` and `bar` take limits: outside `warnMin`/`warnMax` the value turns
+amber, outside `limitMin`/`limitMax` red.
+
+Older boards that use retired names (`stat`, `sparkline`, `gauge`, `progress`,
+`status_dot`, `led_bank`, `annunciator`, `slider`, `dial`, `note`, `sequence`,
+`section`, `image`) still open — they're converted on load and saved in the new
+form.
 
 Example — a PSU panel:
 
@@ -65,7 +86,10 @@ Operators `+ - * / % ^` and comparisons, plus the usual math functions
 
 Draw your plumbing on the same canvas. Drop ISA symbols — `tank`, `pump`,
 `valve` (plus ball/check/3-way/relief), `mfc`, `filter`, `heat_exchanger`,
-`instrument` (the PI/TI/FI bubble, bind `read` and set `tag`) — then arm pipe
+`instrument` (the PI/TI/FI bubble, bind `read` and set `tag`). For electrical
+schematics there are `switch`, `relay`, `breaker`, `fuse`, `psu`, `eload`,
+`battery`, `meter`, `motor` and `ground` — wire them with `wire` connectors
+(or `bus` for a heavy rail). Then arm pipe
 mode and click two symbols to connect them. Connectors can be `pipe` or
 `wire`, route through corner waypoints (drag a segment to bend it), and change color
 live with rules evaluated top-to-bottom:
@@ -87,7 +111,11 @@ Widgets update as each new telemetry frame arrives — the pace is set by the
 rig's sampling rate (default once a second). Two switches to know:
 
 - **Start recording** (toolbar, or `rig.telemetry(true)` from a sequence) —
-  saves telemetry to history. Live view works either way.
+  saves telemetry to history. Live view works either way. Every recording has
+  a name — the one you type, else its start time ("Recording 14:02"). If the
+  rig goes off mid-recording, the recording stays open and saving picks up when
+  it's back; **Stop** works with the rig off too, ending the recording when you
+  press it.
 - **Pause display** (`P`) — freezes the screen while data keeps flowing and
   recording continues; resume snaps back to live.
 
@@ -104,6 +132,46 @@ bands — click one to focus its time range), recording **sessions**, rig
 **offline** spans, instrument **connect/disconnect** events, **captures**
 (scope shots as point-in-time markers), and notes from `rig.annotate()`. Add
 your own **markers** with Alt+click; Alt+drag spans a region.
+
+Rig offline spans are recorded by the hub as they happen, from the rig's last
+heartbeat to its first one back, so they're there after a reload, on another
+machine, and for stretches nobody had the page open.
+
+### Runs
+
+The **Runs** panel lists every test run and recording, newest first. Search
+it, filter by result, and group it by name, serial, rig or tag. Click a run to
+open it in this view: every lane moves to the run's window, and the link
+(`?run=`) opens the same run for anyone you send it to. Click the run again to
+leave it; each lane goes back where it was.
+
+- **Tags** — label any run (`DUT-7`, `thermal-campaign`); a run can have
+  several. Grouping by tag lists a run under each of its tags.
+- **Rename a recording, or change its times** — from its row (pencil, clock).
+  A rename shows everywhere, for everyone. Recordings made before this release
+  are renamed per view until they're brought into the hub's records.
+- **Change a test run's times** — open its log and use *edit times*. The times
+  the rig recorded are kept; *reset to recorded* puts them back. No data is
+  deleted either way: a run is a window over the history.
+- **Delete** removes the run, its log and its captures, and it stays deleted —
+  a re-run `guppi migrate` or a replayed rig event won't bring it back.
+
+#### Share a run by link
+
+Open a run, then **share** on the view's toolbar:
+
+- **Restricted** copies a link to this view at its current windows. It works
+  for people who can already reach these rigs.
+- **Anyone with the link** shares the open run with anyone, no sign-in. They
+  see this view on the run's window, read-only; a run that's still going
+  updates live until it ends. The link always shows the view as saved, so
+  later changes to the view reach it too. Turn the switch off and the link
+  stops working for good; turning it on again makes a new link.
+
+A shared link only reads what the view shows: its plots, stats, string and
+digital channels, inside the run's window. Traces, images and logs aren't
+included, and a rig drops out of the link if the person who shared it loses
+access to it.
 
 When you type a formula in a plot legend, matching signal names are suggested
 as you type — pick one and the full signal reference is inserted; you never
@@ -129,14 +197,17 @@ Know exactly what that means so you never mistake a summary for the data:
   is a spike-preserving min/max envelope, but the artifact holds every
   sample.
 - **Read numbers from data, not from pixels.** For analysis, limits, or
-  anything that matters, pull the real samples: `guppi results` exports a
+  anything that matters, pull the real samples: `guppi runs <id> --bundle` exports a
   run's measurements and full waveforms to CSV, and the whole history is
   plain SQL away — see [Direct data access](data-access.md).
 
-## Working with the agent
+## Building with a coding agent
 
-The agent sees the board you have open. Ask it to "add a lane with pack
-voltage and current", "wire the P&ID so the feed line turns red over 400 kPa",
-or "write a power-on sequence button" — it edits the JSON through patch
-operations, so it changes only what you asked and leaves the rest of your
-layout alone.
+Dashboards and data views are files, so Claude Code (or any coding agent with
+a shell) can build them for you. Run `guppi skills install` once; then ask it
+to "add a lane with pack voltage and current", "wire the P&ID so the feed line
+turns red over 400 kPa", or "write a power-on sequence button". It looks up
+the real signal paths (`guppi catalog`), edits the JSON, checks it against the
+rig (`guppi push --check`) and pushes it (`guppi push`). A page you have open
+reloads within a few seconds; if you have unsaved edits on it, the app asks
+which to keep. See [Dashboards and data views as files](cli.md#dashboards-and-data-views-as-files).

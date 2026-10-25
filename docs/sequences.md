@@ -7,18 +7,18 @@ Two kinds of button live on a dashboard:
 
 - **`button`** — fires exactly one device capability (arm, capture, start).
   No parameters, no steps.
-- **`sequence`** — runs a short script you write. It can step, dwell, loop,
-  read back, prompt the operator, and call other buttons.
+- **script button** (a `button` with a `script`; called `sequence` before) —
+  runs a short script you write. It can step, dwell, loop, read back, prompt
+  the operator, and call other buttons.
 
 This page is about sequences. For saved, repeatable pass/fail tests, use
 [OpenHTF test plans](openhtf-authoring-guide.md) instead.
 
 ## Writing a sequence
 
-Add a **Sequence** block in dashboard edit mode and open its script editor.
+Add a **Script button** block in dashboard edit mode and open its script editor.
 The script is the body of an async JavaScript function; `rig` is in scope and
-top-level `await` works. Ask the Guppi agent to write it for you, or start
-from this:
+top-level `await` works. Start from this:
 
 ```js
 await rig.telemetry(true);                              // label + start recording

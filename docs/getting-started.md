@@ -171,25 +171,31 @@ cd libuldaq-1.2.1 && ./configure && make -j"$(nproc)" && sudo make install && su
 ## 5. Run tests from your terminal (optional)
 
 The dashboard can run tests on its own; the `guppi` CLI drives the same runs
-from a terminal (`guppi run`, `guppi results`, `guppi abort`, `guppi rigs`),
+from a terminal (`guppi run`, `guppi runs`, `guppi abort`, `guppi rigs`),
 talking to the hub over HTTP. **Hub and rack boxes already have it** — the
 installers build the full CLI, so on the bench you just run it.
 
-To drive runs from any other machine (a laptop on the bench LAN), install the
-CLI from the release's source tarball and point it at the hub:
+To drive the bench from any other machine (a laptop on the bench LAN), install
+the CLI from the release's source tarball and point it at the hub. The CLI
+needs Python 3.12; `uv` fetches it for you:
 
 ```
 curl -fsSL -o /tmp/guppi-src.tar.gz \
   https://github.com/ezzatisawesome/guppi/releases/latest/download/guppi-src.tar.gz
 tar -xzf /tmp/guppi-src.tar.gz -C /tmp
-pipx install /tmp/guppi/packages/cli
-export GUPPI_HUB=http://bench.local:8000    # or pass --hub per command
+uv tool install --python 3.12 /tmp/guppi/packages/cli   # or: pipx install --python python3.12 …
+guppi control bench.local      # the bench's hostname or IP; saved for every command
+guppi skills install           # optional: teach Claude Code to build dashboards
 ```
+
+From then on, dashboards and data views you (or Claude Code) write on the
+laptop go to the bench with `guppi push` and show up in its browser tabs
+within seconds. See [Dashboards and data views as files](cli.md#dashboards-and-data-views-as-files).
 
 ```
 guppi rigs                # list paired rigs — a good first check
 guppi run smoke-test      # derive the plan, approve, run; prompts answered inline
-guppi results             # write the latest run bundle (run.json + CSVs + scope/)
+guppi runs --bundle       # write the latest run bundle (run.json + CSVs + scope/)
 ```
 
 It's the same program everywhere — one `guppi`, whether the installer built it

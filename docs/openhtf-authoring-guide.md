@@ -67,13 +67,13 @@ Key consequences you must design around:
 To run what you write: save it as `tests/<name>.py` in the rig workspace, then
 run it from the dashboard's test panel or with `guppi run <name>` (a path to a
 `.py` file also works) — see the [CLI reference](cli.md). Results come back via
-`guppi results` or the dashboard.
+`guppi runs <id> --bundle` or the dashboard.
 
 Two runtime modes, transparent to the script:
 
-- **Local ("Pi") mode** — `agent` backend, LAN-only, no auth, no AI.
-- **Cloud mode** — sign in at guppi.app; the AI agent can drive runs and
-  answer prompts.
+- **Local ("Pi") mode** — `agent` backend, LAN-only, no auth.
+- **Cloud mode** — sign in at guppi.app; runs can be started and prompts
+  answered remotely.
 
 The script you write is identical in both. The rack is outbound-only (dials
 out, never accepts inbound), so you never think about ports or IPs — a rig is
@@ -194,7 +194,7 @@ Rules that keep results clean:
 ## 5. Prompts — collaborative pause points
 
 `prompt()` blocks the phase until answered from the CLI (`guppi run` asks
-inline), the web UI (a card on the test panel), or the AI agent. Every prompt —
+inline) or the web UI (a card on the test panel). Every prompt —
 question, answer, responder, timestamps — is recorded in `prompts[]` of the
 run-state doc.
 

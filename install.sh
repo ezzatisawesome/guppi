@@ -118,34 +118,6 @@ unset __venv __owner
 COMPONENT=hub
 case "${1:-}" in hub|rack) COMPONENT="$1"; shift ;; esac
 
-# ── Access gate ──────────────────────────────────────────────────────────────
-# Invite-gating the installer is OFF by default for now: install/update is open.
-# Re-enable by exporting GUPPI_ACCESS_ENFORCE=1 (then a valid access code is
-# required, validated against the hosted checker). Even when enforced, the gate
-# is skipped for uninstall (below), for air-gapped/CI installs (GUPPI_SRC_TARBALL),
-# and for an explicit GUPPI_ACCESS_SKIP=1.
-check_access() {
-  [ "${GUPPI_ACCESS_ENFORCE:-0}" = "1" ] || return 0
-  [ "${GUPPI_ACCESS_SKIP:-0}" = "1" ] && return 0
-  [ -n "${GUPPI_SRC_TARBALL:-}" ] && return 0
-  local url="${GUPPI_ACCESS_URL:-https://guppi-agent.fly.dev}"
-  local code="${GUPPI_ACCESS_CODE:-}"
-  [ -n "$code" ] || fail "An access code is required. Re-run with:
-    ... | sudo GUPPI_ACCESS_CODE=YOUR_CODE bash
-  Don't have one? Join the waitlist at https://app.guppidev.com/waitlist"
-  local resp
-  resp=$(curl -fsS --connect-timeout 15 -X POST "$url/access/check" \
-    -H "Content-Type: application/json" -d "{\"code\":\"$code\"}" 2>/dev/null || true)
-  case "$resp" in
-    *'"valid":true'*)  echo "  ✓ access code accepted" ;;
-    *'"valid":false'*) fail "That access code isn't valid. Join the waitlist at https://app.guppidev.com/waitlist" ;;
-    *)                 fail "Couldn't reach the access validator at $url — check your connection and retry." ;;
-  esac
-}
-if [ "${1:-}" != "--uninstall" ] && [ "${GUPPI_UNINSTALL:-0}" != "1" ]; then
-  check_access
-fi
-
 if [ "$COMPONENT" = rack ]; then
   # Only hand off to a rack install.sh sitting NEXT TO this script (a bundled or
   # checked-out tree). Do NOT fall back to the on-disk $GUPPI_HOME tree here: a

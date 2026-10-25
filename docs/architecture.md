@@ -63,7 +63,7 @@ local Postgres (psql, Grafana, pandas, Jupyter) is a supported feature — see
 ## Local island or cloud
 
 The same box can run as a local island (no accounts, what the installer sets
-up) or hand control to Guppi Cloud for remote access, team sharing, and the AI
-features. `guppi control cloud` / `guppi control local` is the one switch —
+up) or hand control to Guppi Cloud for remote access, cloud history, team
+sharing, and share links. `guppi control cloud` / `guppi control local` is the one switch —
 the rig keeps its identity and history across the move. See the
 [CLI reference](cli.md#bench-control).
