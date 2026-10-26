@@ -25,6 +25,9 @@ upgrading (`guppi update`) and pinning a version.
   scripts to Guppi standards: the `TEST_PHASES` contract, measurements and
   limits, prompts, the three safety layers, declarative sweeps, and capturing
   waveforms/sweep metrics by reference.
+- [**Uploading data files**](uploading-data.md) — bring CSV data from loggers,
+  scopes and spreadsheets into a rig's history with `guppi upload` (local or
+  cloud); formats, time zones and big files.
 - [**Direct data access**](data-access.md) — your data is a normal Postgres:
   query it with `psql`, PostgREST (HTTP/JSON), pandas, or Grafana. No export
   ceremony.

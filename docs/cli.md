@@ -86,7 +86,7 @@ and only someone on the rack box can change it: the hub can't overrule it.
 Add `--view-only` to a switch (`guppi control cloud --view-only`) to pair and
 deny in one step. `guppi control` with no argument shows the current setting.
 
-## Read data
+## Data
 
 ```
 guppi catalog [filter] [--kind signal|capability] [--values] [--rig R]
@@ -109,6 +109,26 @@ guppi runs [EXECUTION] [--bundle [DIR]] [--limit N] [--rig R]
 
 For `--bundle`, `EXECUTION` may be a prefix; omit it to take the latest run.
 `DIR` defaults to `run-<date>-<id>/`.
+
+### Upload data files
+
+```
+guppi upload FILE… [--dry-run] [--rig R] [--device NAME] [--name NAME] [--no-recording]
+                   [--tz ZONE] [--start TIME] [--time-column COL] [--time-format FMT]
+                   [--layout wide|long] [--delimiter D] [--decimal .|,] [--skip-rows N]
+                   [--unit COL=UNIT]… [--encoding ENC] [--format csv]
+guppi uploads [--limit N] [--rig R]
+guppi uploads rm <upload id> [--rig R]     # take one back out, to redo it
+```
+
+`upload` puts data files (CSV today) into the rig's stored history, on a local
+hub or the cloud alike. Each column becomes `<device>.<column>` (the device
+defaults to the file name) and the file lists as a recording. Delimiter,
+decimal comma, header, units, layout and the time column and format are
+detected — `--dry-run` shows what was picked and writes nothing. Times without
+a zone are read in this computer's zone (`--tz` to change); elapsed-time files
+need `--start`. The same file twice is one upload. Millions of points are
+fine; the CLI shows progress. Details: [Uploading data files](uploading-data.md).
 
 ## Run tests
 
