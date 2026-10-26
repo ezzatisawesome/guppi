@@ -66,4 +66,4 @@ The same box can run as a local island (no accounts, what the installer sets
 up) or hand control to Guppi Cloud for remote access, cloud history, team
 sharing, and share links. `guppi control cloud` / `guppi control local` is the one switch —
 the rig keeps its identity and history across the move. See the
-[CLI reference](cli.md#bench-control).
+[CLI reference](cli.md#connect).

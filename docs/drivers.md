@@ -247,11 +247,27 @@ unit, and an optional label. The full path seen everywhere downstream is
 `EnumOption(token, code, label)` mapping the instrument's string tokens to
 the numeric codes that stream as telemetry.
 
-`signal_type` is a free-form hint that the catalog projects to two UI types:
+`signal_type` is a free-form hint that the catalog projects to three UI types:
 `"digital"`, `"output"`, `"bool"`, `"boolean"`, or `"state"` become
-**digital** (renderable as a toggle); anything else (`"voltage"`,
+**digital** (renderable as a toggle); `"string"` or `"text"` become
+**string** (a text channel — see below); anything else (`"voltage"`,
 `"current"`, `"temperature"`, …) is **analog** (readouts, bars, gauges,
-setpoints). `direction` gates controls: `"in"` (measured — the default) is
+setpoints).
+
+A **text** signal reports words rather than numbers, and the data view needs one
+more thing from you to draw it: does a value *hold* until the next one, or mark a
+single instant? Say which with `string_kind`:
+
+```python
+DeviceSignal(name="mode",  signal_type="string", string_kind="state")   # booting → armed → safe
+DeviceSignal(name="fault", signal_type="string", string_kind="event")   # "overcurrent", once
+```
+
+A `"state"` is shaded as a span between samples; an `"event"` is marked as a pin
+at its own instant. It cannot be inferred — the samples look identical either way
+— so a signal that doesn't say is drawn as events, which is the reading that
+can't claim a duration that never happened. Either way, a channel that turns out
+to carry many lines per window is shown as a scrolling log instead. `direction` gates controls: `"in"` (measured — the default) is
 always read-only, even if a matching write capability exists; use `"out"`
 (commanded) or `"bidir"` (measured *and* commandable) for anything a user
 should be able to set from the dashboard.

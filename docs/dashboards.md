@@ -156,20 +156,23 @@ leave it; each lane goes back where it was.
 - **Delete** removes the run, its log and its captures, and it stays deleted —
   a re-run `guppi migrate` or a replayed rig event won't bring it back.
 
-#### Share a run by link
+#### Share a view by link
 
-Open a run, then **share** on the view's toolbar:
+Click **share** on the view's toolbar and turn on **Anyone with the link**. The
+link is copied, and it shows what's on screen right now to anyone, no sign-in:
+this view's layout with each lane on the time window it shows. They can zoom
+and pan inside that time frame, read-only. A lane following live is frozen
+when you open the share panel.
 
-- **Restricted** copies a link to this view at its current windows. It works
-  for people who can already reach these rigs.
-- **Anyone with the link** shares the open run with anyone, no sign-in. They
-  see this view on the run's window, read-only; a run that's still going
-  updates live until it ends. The link always shows the view as saved, so
-  later changes to the view reach it too. Turn the switch off and the link
-  stops working for good; turning it on again makes a new link.
+- Turning the switch off stops that link; turning it back on for the same
+  screen brings back the same link.
+- Pan or change the view and share again for a new link. Links you already
+  sent keep showing what they showed.
+- When other links to the view are on, the panel says how many, with **Turn
+  all off**.
 
-A shared link only reads what the view shows: its plots, stats, string and
-digital channels, inside the run's window. Traces, images and logs aren't
+A shared link reads only what it shows: the view's plots, stats, string and
+digital channels, inside its time frame. Traces, images and logs aren't
 included, and a rig drops out of the link if the person who shared it loses
 access to it.
 

@@ -184,7 +184,7 @@ curl -fsSL -o /tmp/guppi-src.tar.gz \
   https://github.com/ezzatisawesome/guppi/releases/latest/download/guppi-src.tar.gz
 tar -xzf /tmp/guppi-src.tar.gz -C /tmp
 uv tool install --python 3.12 /tmp/guppi/packages/cli   # or: pipx install --python python3.12 …
-guppi control bench.local      # the bench's hostname or IP; saved for every command
+guppi use condor               # the bench's hostname (or IP); checked, then saved for every command
 guppi skills install           # optional: teach Claude Code to build dashboards
 ```
 
