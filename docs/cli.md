@@ -212,10 +212,13 @@ Scripts and coding agents:
   `guppi migrate`, which needs a signed-in account.
 - `guppi run` exits `0` pass, `1` fail, `2` error, `3` aborted.
 
-To set up Claude Code: `guppi skills install` copies two skills into
+To set up Claude Code: `guppi skills install` copies five skills into
 `~/.claude/skills` — `guppi-pages` (build and edit dashboards and data views as
-files) and `guppi-analysis` (query history and runs into pandas). They ship
-with the CLI, so re-run it after `guppi update`.
+files), `guppi-analysis` (query history and runs into pandas),
+`guppi-rig-setup` (declare a bench and troubleshoot it), `guppi-driver` (write a
+driver for an unsupported instrument) and `write-openhtf-test` (write, run and
+debug OpenHTF test scripts). They ship with the CLI, so re-run it after
+`guppi update`.
 
 ## Bench box
 
@@ -259,41 +262,15 @@ the account that paired the rig can unpair it.
 ```
 guppi rack config check    # validate ~/.guppi/rig_config.yml (parse + schema + scan)
 guppi rack config check --no-scan   # validate without probing hardware
-guppi rack devices         # full-screen app: see, add, edit and test every device
-guppi rack devices add     # the same app, opened straight on its Add screen
-guppi rack devices list    # show devices declared in rig_config.yml
+guppi rack devices         # show devices declared in rig_config.yml
 guppi rack devices scan    # print discovered hardware (stable paths), write nothing
 ```
 
-`guppi rack devices` with no subcommand is the one to reach for: it runs over
-SSH on the rack box, lists every device with a reachability dot, adds from a
-bus scan, edits any parameter in place, and connects to the instrument to show
-you a real reading before anything is written. The YAML — comments and all —
-stays the source of truth underneath. With no terminal to draw on (piped, cron,
-CI) it prints the device list and exits instead of hanging; `devices add`
-exits with an error, since there is nothing to add from without a screen —
-edit `rig_config.yml` and run `guppi rack config check` instead.
-
-It is driven entirely from the keyboard; there are no buttons to click:
-
-| key | |
-|---|---|
-| `a` | add a device (scans VISA, the network and the serial ports) |
-| `e` / `enter` | edit the selected device |
-| `space` | enable / disable it |
-| `d` | remove it |
-| `r` | re-probe reachability |
-| `D` | drivers & dependencies — add a driver path, install an extra |
-| `q` | quit |
-
-On a device form: `^s` saves, `^t` connects and reads the instrument, `esc`
-goes back. In a channel tick-list, `space` toggles the channel under the
-cursor, `a` takes all and `n` takes none. A parameter you have changed away
-from its default is marked with what the default was; a folded "more settings"
-section says how many of its rows you have set.
-
-**Stop the rack before scanning or testing** — a running rack holds the
-instruments, and the app says so on a banner rather than refusing to open.
-Viewing and editing the config work either way.
+Adding, editing and switching instruments on or off happens in Guppi itself:
+open the rig and choose **Instruments**. It works the same on a bench's own
+local site and in the cloud. You can scan for what's plugged in, test an
+address before saving, and switch an instrument off without losing its
+settings. `rig_config.yml` on the rack stays the source of truth — every change
+is written there, comments and all.
 
 See [Configuring your rig](rig-config.md) for the full file reference.

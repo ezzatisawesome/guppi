@@ -22,14 +22,17 @@ Four sources, merged in this order (later wins on name collisions):
    directory; relative paths resolve against the config file's directory:
 
    ```yaml
-   drivers:
-     - "/home/me/my-board-firmware/tools/driver"
+   rig:
+     drivers:
+       - "/home/me/my-board-firmware/tools/driver"
    ```
 
 Drivers load at rack startup — after adding a `drivers:` entry or editing
 driver code, **restart `guppi rack`** to pick it up (there is no hot reload).
-The startup log prints a `Loaded N driver(s) from …` line for each source
-that contributed. A driver class is picked up if it subclasses the rack's
+The startup log prints a `Loaded N driver(s) from …` line for the two path
+sources — `GUPPI_DRIVER_PATH` and `drivers:` — so that line is the one to look
+for after adding your own; built-ins and entry-point drivers are reported
+differently. A driver class is picked up if it subclasses the rack's
 `Device` base and isn't abstract; classes whose name starts with `_` are
 treated as private shared bases and skipped.
 
@@ -47,10 +50,12 @@ parts, not `Device` directly. Pick the closest fit:
 | `SweptAnalyzer` | swept-frequency analyzers (spectrum / network / signal) | the arm → sweep → fetch-trace contract with swept-trace artifacts |
 
 Subclass the family, fill in the SCPI specifics for your model, and the
-capture/streaming plumbing comes for free. Everything you import lives in
-two modules: `devices.core.device` (`Device`, `ScpiInstrument`,
-`ChannelInstrument`, `DeviceSignal`, `DeviceCapability`, `EnumOption`,
-`Read`, `Sampling`) and `devices.core.codec` (`ScpiCodec`).
+capture/streaming plumbing comes for free. Most of what you import lives in
+`devices.core.device` (`Device`, `ScpiInstrument`, `ChannelInstrument`,
+`Field`, `DeviceSignal`, `DeviceCapability`, `EnumOption`, `Read`,
+`Sampling`), with `ScpiCodec` in `devices.core.codec`. The family bases live
+beside their drivers: `ELoad` in `devices.eload.base`, `ScpiScope` in
+`devices.scope.base`, `SweptAnalyzer` in `devices.rf.swept_base`.
 
 ### What a `ChannelInstrument` subclass implements
 
@@ -59,6 +64,7 @@ per-channel SCPI:
 
 - `measure_voltage(channel)` / `measure_current(channel)` — measured values
 - `set_voltage(channel, voltage)` / `set_current(channel, current)` — setpoints
+- `get_voltage(channel)` / `get_current(channel)` — **setpoint readbacks**
 - `get_output(channel)` / `set_output(channel, enabled)` — output state
 
 The base's `__init__(scpi, num_channels=None, channel_limits=None, ...)`
@@ -89,6 +95,12 @@ class AcmeEL300(ChannelInstrument):
         self._validate_current(channel, current)
         self.scpi.write(f"CURR {current}")
 
+    def get_voltage(self, channel):
+        return float(self.scpi.query("VOLT?"))  # setpoint, not the measurement
+
+    def get_current(self, channel):
+        return float(self.scpi.query("CURR?"))
+
     def get_output(self, channel):
         return self.scpi.query("INP?").strip() in ("1", "ON")
 
@@ -97,9 +109,15 @@ class AcmeEL300(ChannelInstrument):
 ```
 
 That's a full device surface — `1.voltage` / `1.current` telemetry, setpoint
-readbacks, and a watchdog-killable output toggle — from six methods. (The
-base generates capabilities for all six, so implement all of them — the
-`_validate_*` helpers enforce the per-channel `channel_limits` from config.)
+readbacks, and a watchdog-killable output toggle — from eight methods. The
+base generates capabilities for all of them, so implement all of them; the
+`_validate_*` helpers enforce the per-channel `channel_limits` from config.
+
+Don't skip `get_voltage` / `get_current`: they are what seed the
+`{ch}.voltage_setpoint` and `{ch}.current_setpoint` signals. Leave them out
+and the base's read is cached as unavailable once, so **both setpoint signals
+silently never stream again** for the life of the rack process — no error,
+just two channels that stay empty.
 
 If your instrument has a *stateful* channel select (select once, then read),
 override `measure_channel(channel)` to select and read voltage, current, and
@@ -178,9 +196,70 @@ it **into the rack's environment** — the driver runs inside the rack process,
 so a library installed anywhere else won't be found. For a properly
 distributed driver, declare it as a dependency of your package instead (see
 [Distributing a driver as a package](#distributing-a-driver-as-a-package)).
-A driver can also declare
-`requires = (("uldaq", "daq"),)` — (module, extra) pairs — so a missing
-optional SDK is named up front at load rather than failing mid-import.
+A driver can also declare `requires = (("uldaq", "daq"),)` — `(module, extra)`,
+or `(module, extra, shared_library)` when a system library is needed too — so a
+missing optional SDK is named up front at load rather than failing mid-import.
+`guppi rack config check` preflights it, and the user installs it with
+`guppi rack deps install <extra>`, which lands the package in the **rack's own**
+interpreter rather than whichever Python happens to be active.
+`guppi rack deps list` shows the available extras. Note there is no `serial`
+extra: `pyserial` ships inside `can`.
+
+## The short way: declare the surface with `Field`
+
+Most shipped drivers don't hand-write `signals()`, `capabilities()`, `measure()`
+and `invoke()` separately. They declare a list of `Field`s, and each one
+generates the signal, the matching `set_` capability, the read decode and the
+write dispatch together — so the four can't drift apart:
+
+```python
+from devices.core.device import EnumOption, Field, ScpiInstrument
+
+
+class AcmeSensor(ScpiInstrument):
+    idn_models = ("ACME-1200",)
+    category = "other"
+
+    def fields(self) -> list[Field]:
+        return [
+            Field("pressure", "number", "r", unit="kPa",
+                  getter=lambda: float(self.scpi.query("MEAS:PRES?").strip())),
+            Field("units", "enum", "rw",
+                  options=(EnumOption("KPA", 0.0), EnumOption("PSI", 1.0)),
+                  getter=lambda: 0.0 if self.scpi.query("CONF:UNIT?").strip() == "KPA" else 1.0,
+                  setter=lambda v: self.scpi.write(f"CONF:UNIT {v}")),
+            Field("heater", "bool", "rw", energizing=True,
+                  getter=lambda: self.scpi.query("OUTP:HEAT?").strip() == "1",
+                  setter=lambda v: self.scpi.write(f"OUTP:HEAT {1 if v else 0}")),
+            Field("zero", "action", setter=lambda: self.scpi.write("CAL:ZERO")),
+        ]
+
+    def signals(self):
+        return self._field_signals()
+
+    def capabilities(self):
+        return self._field_capabilities()
+```
+
+That gives signals `pressure`, `units`, `heater` and commands `set_units`,
+`set_heater`, `zero` — with `measure()` and `invoke()` inherited.
+
+- `kind` is `"number"`, `"bool"`, `"enum"` or `"action"`; `access` is `"r"`,
+  `"w"` or `"rw"`.
+- A field **with** a getter is polled; a setter-only field is served from a
+  cache and poked on write, so a write-only setpoint still reads back the
+  commanded value.
+- The generated command is `set_<name>` (an `action` keeps its own name), and
+  its parameter is `enabled` for a bool, `value` otherwise — which is why a
+  bool field with `energizing=True` satisfies the de-energize contract
+  automatically.
+- An `enum`'s options are `EnumOption(token, code, label="")`: `token` is what a
+  write sends and the setter receives, `code` is the number the readback
+  streams.
+
+Prefer this for a new driver. The longhand below is what it generates, and is
+still the right thing to read when you need to see the moving parts — or to
+override one of them.
 
 ## A minimal driver
 
@@ -219,16 +298,20 @@ class MyMeter(Device):
 Declare it in `rig_config.yml`:
 
 ```yaml
-devices:
-  - id: meter1
-    name: "My Meter"
-    type: MyMeter
-    enabled: true
-    connection:
-      type: VISA
-      address: "USB0::0x1234::0x5678::SERIAL::INSTR"
-      timeout: 10.0
+rig:
+  devices:
+    - id: meter1
+      name: "My Meter"
+      type: MyMeter
+      enabled: true
+      connection:
+        type: VISA
+        address: "USB0::0x1234::0x5678::SERIAL::INSTR"
+        timeout: 10.0
 ```
+
+(Every key in `rig_config.yml` lives under the one top-level `rig:` key — a
+config without it won't load.)
 
 That's a working, streaming instrument. Restart `guppi rack` and success
 looks like this: the startup scan lists the device, `meter1.voltage` appears
@@ -291,9 +374,11 @@ samples on their own thread and hand them over in batches.
 
 **Read failures and quarantine** — how you fail matters. **Raising** from
 `measure()`/`read_all()` counts as a failed read: after 5 consecutive
-failures the device is quarantined — marked degraded, polled only every
-30 s (with a `reconnect()` attempt before each retry) — and it recovers
-automatically on the first successful read. **Returning `{}` or a partial
+failures the device is quarantined — marked degraded, then retried on a
+backoff that starts at 2 s and doubles to a 30 s ceiling (with a
+`reconnect()` attempt before each retry) — and it recovers automatically on
+the first successful read. The tick that recovers it is discarded, since
+`on_reconnect()` may have just re-run setup. **Returning `{}` or a partial
 dict is a healthy tick**: missing signals just aren't recorded, the failure
 counter resets, and polling continues at full cadence. So when the hardware
 is genuinely unreachable, *raise* — returning `{}` silently hides a
@@ -322,12 +407,21 @@ the chip actually reset, and re-apply setup only if it did.
 **`capabilities()` / `invoke(name, params)`** — writable controls (set a
 voltage, toggle an output). Each `DeviceCapability` declares a name and a
 JSON schema for its parameters — a map of parameter name → schema fragment,
-as in the examples below. **If a capability can source *or sink* power (a
-supply output, a load input, a relay feeding a DUT), set `energizing=True`**
-— the safety watchdog de-energizes a rig by invoking every energizing
-capability with `{"enabled": False}`, and it can only do that for
-capabilities that are marked. That contract means an energizing capability
-must accept a boolean parameter named exactly `enabled`.
+as in the examples below. **Every key you declare is required**, so an
+optional parameter must be left out of the schema entirely and read
+opportunistically inside `invoke()`.
+
+**If a capability can source *or sink* power (a supply output, a load input, a
+relay feeding a DUT), set `energizing=True`** — the safety watchdog
+de-energizes a rig by invoking every energizing capability with
+`{"enabled": False}`, and it can only do that for capabilities that are marked.
+
+Marking it is necessary but **not sufficient**: the parameter schema must be
+*exactly* one boolean named `enabled` (`{"enabled": {"type": "boolean"}}`). A
+parameterless energizing action would be fired blind, and a flag under another
+name could invert the meaning, so the watchdog **skips** anything that doesn't
+match and only logs a warning. Check the rack log after adding one — a skipped
+capability means that output stays live through a shutdown.
 
 ### Pairing a capability with a signal (dashboard controls)
 
@@ -377,16 +471,32 @@ transport.
 
 **Driver-owned (everything else)** — no `connection:` block; your driver
 takes its own parameters (`port=`, `can_device=`, …) and opens whatever it
-needs in `connect()`. Serial sensors, CAN boards, HTTP gadgets.
+needs in `connect()`. CAN boards, HTTP gadgets, and anything behind a vendor
+library.
+
+A plain **ASCII serial** instrument does *not* need this shape, and in-tree
+drivers don't use it: keep it rack-managed with an `ASRL` VISA address and let
+the `connection:` block carry the line settings, so you inherit the
+thread-safe codec, the port guard and reconnect for free.
+
+```yaml
+      connection:
+        type: visa
+        address: "ASRL/dev/serial/by-id/usb-Acme-if00::INSTR"
+        baud_rate: 19200
+        read_termination: "\r"
+        write_termination: "\r"
+```
 
 In both shapes, extra keys in the device's config block are matched by name
 to your `__init__` parameters — declare `num_channels`, `bitrate`, or any
 custom knob as a keyword argument and users can set it in YAML. Values
 arrive **verbatim with their YAML types** (no coercion): `address: 0x74`
 arrives as an int, `address: "0x74"` as a string — normalise in `__init__`
-(`int(x, 0)` handles both). Keys that match no parameter are silently
-ignored, so a typo'd knob won't error — double-check spelling against your
-signature.
+(`int(x, 0)` handles both). Keys that match no parameter don't fail
+construction, but they aren't lost either: `guppi rack config check` lists them
+with a "did you mean" suggestion, as long as the driver class loaded. Run it
+after adding a knob.
 
 ### Pinning USB serial ports (`port:`) — use `/dev/serial/by-id/`
 
@@ -549,10 +659,11 @@ except ModuleNotFoundError:      # running outside the rack (bench CLI use)
     DeviceCapability = DeviceSignal = None
 ```
 
-This is the one acceptable try/except import: it guards the *rack's own SDK*
-for standalone use, where the fallback is deliberate and total. Real
-third-party dependencies (`pyserial`, a vendor SDK) must still fail loudly —
-see above.
+If you do this, it is the one acceptable try/except import: it guards the
+*rack's own SDK* for standalone use, where the fallback is deliberate and
+total. Real third-party dependencies (`pyserial`, a vendor SDK) must still fail
+loudly — see above. No in-tree driver currently needs this, so treat it as an
+option for a bench CLI rather than house style.
 
 ## Self-describing devices (DUTs)
 

@@ -31,6 +31,24 @@ nothing else. If two
 uploads wrote into the same signals over overlapping times, their data can't be
 told apart, so deleting just one of them is refused.
 
+
+## From the browser
+
+Drag a CSV anywhere in Guppi and it goes to the rig you're looking at; a rig's
+own page also has an **Upload data** button. Either way the hub reads the file
+first and reports what it found — the format it picked, the time column, every
+signal with its unit and sample count, and any warnings — and nothing is stored
+until you confirm. The dialog is a thin client over the same
+`POST /rigs/{rig_id}/uploads` door described below, so a file behaves
+identically whether it arrives from `guppi upload` or from a drag: the same
+detection, the same messages, the same checksum de-duplication.
+
+Two differences worth knowing. A browser upload asks for a recording by
+default (`recording=true`), because the Runs list is how you then find the
+window the file covers. And an elapsed-time file has no absolute time in it, so
+the hub refuses it until you say when time zero was; the dialog asks for that
+inline and re-reads the file.
+
 ## What it reads
 
 CSV today; more formats are coming. Everything below is **detected**, and

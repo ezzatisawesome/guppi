@@ -9,7 +9,7 @@ single top-level `rig:` key.
 rig:
   id: "rig1"
   name: "Production Test Rack"
-  telemetry: { measurement_interval: 0.1, enabled: true }
+  telemetry: { measurement_interval: 0.1 }
   devices: [ ... ]
   safety:   { abort_limits: [ ... ] }
   ethernet: { enabled: true }
@@ -22,15 +22,19 @@ rig:
 | --- | --- | --- |
 | `id` | **Required.** Unique rig identifier. Every telemetry/command broker topic is namespaced by it, so it must match the id the agent addresses the rig by. Overridden by the `GUPPI_RIG_ID` env var once a rig is paired. | — |
 | `name`, `description` | Cosmetic labels shown in the UI. | — |
-| `telemetry` | `measurement_interval` (seconds between samples) and `enabled`. | interval `0.1` |
+| `telemetry` | `measurement_interval` — seconds between sample ticks. | `1.0` |
 | `devices` | The instruments on the bench (see below). | `[]` |
 | `safety` | L1 watchdog abort-limits (see below). | none |
 | `ethernet` | Bring the rack onto networked instruments' subnets (see below). | enabled |
 | `auto_discover_instruments` | Run the startup VISA/LAN scan and merge in undeclared instruments. | `true` |
 | `drivers` | Filesystem paths to **custom** driver code (see below). | `[]` |
+| `reconnect_interval` | Seconds between retries for a device that failed to connect at boot. Floored at 0.25 s — a 0 here once burned a CPU core per dark instrument. | `5.0` |
+| `connect_budget_s` | How long boot waits for devices before handing the stragglers to the background reconnect loop. `0` disables the deadline. | `30.0` |
 
-> The old `instruments:` key is **deprecated** — use `devices:`. The loader raises
-> if it sees `instruments:`.
+> The old `instruments:` key is **deprecated** — use `devices:`. The loader
+> raises on `instruments:` only when there is no `devices:` list to use; with
+> both present the `instruments:` block is **ignored**, so a half-renamed config
+> silently loses those devices. `guppi rack config check` flags it either way.
 
 ## Devices
 
@@ -43,7 +47,7 @@ The **rack** opens the connection and hands the driver a thread-safe SCPI codec.
 Use this for any bench instrument you talk to over VISA (USB/LAN/serial).
 
 ```yaml
-- id: psu1                       # required, unique (ids "system"/"execution"/"artifact" are reserved)
+- id: psu1                       # required, unique; "system"/"execution"/"artifact" are reserved (any casing)
   name: "BK9130 Power Supply"    # required
   type: BK9130                   # required — a registered driver name
   enabled: true                  # default true; false skips the device at load
@@ -51,7 +55,9 @@ Use this for any bench instrument you talk to over VISA (USB/LAN/serial).
   channels: [1, 3]               # optional: expose only these channels (default: all); count or list
   poll_channels: [1]             # optional: of the exposed channels, stream only these (default: all)
   rate_hz: 10                    # optional per-device sample rate (else telemetry.measurement_interval)
-  role: device                   # semantic tag: device (equipment) | dut (thing under test)
+  role: device                   # device (equipment) | dut (thing under test); anything else becomes device
+  serial: "802001234"            # optional — *IDN? serial, so the rack can re-find it if it moves
+  control_timeout_s: 2.0         # optional — shorter I/O timeout for a read that must not hang
   connection:
     type: VISA                   # VISA | SIM | <registered transport>
     address: "USB0::0xFFFF::0x9130::...::INSTR"
@@ -63,8 +69,8 @@ Use this for any bench instrument you talk to over VISA (USB/LAN/serial).
 One `type:` often covers a whole model family, not a single part number: the
 supplies in a series share a command set, so one driver serves all of them and
 reads the exact model from `*IDN?` at connect to apply that model's ratings. For
-example `type: BK9115` drives the **9115, 9115B, 9116, and 9117**. Auto-discovery
-(`guppi rack devices`) picks the right driver for you; you only type `type:` by
+example `type: BK9115` drives the **9115, 9115B, 9116, and 9117**. Scanning from
+**Instruments** picks the right driver for you; you only type `type:` by
 hand when writing config yourself — use the family driver name for any member.
 
 ### Shape 2 — driver-owned transport (CAN/I²C/SPI/HTTP boards, DUTs)
@@ -140,9 +146,11 @@ device is constructed:
   per-tick telemetry read, which speeds up a frame with many outputs but few under
   test. Default: poll every exposed channel.
 
-Both take a count or an explicit list, validated in `guppi rack config check`.
-`channel_limits` stays indexed by physical channel, so selecting a subset doesn't
-change how you write it.
+Both take a count or an explicit list, and `poll_channels` must be a subset of
+the exposed `channels`. Note that **neither is checked by
+`guppi rack config check`** — a bad value only surfaces when the rack loads the
+device. `channel_limits` stays indexed by physical channel, so selecting a
+subset doesn't change how you write it.
 
 These two keys only do something on a channelised driver. On anything else — a
 bespoke `Device`, which is what most custom drivers are — the loader reads them
@@ -185,11 +193,18 @@ ethernet:
   enabled: true                  # default true
   iface: eth1                    # optional — pin a dedicated port; unset = auto-pick (never the uplink)
   discovery_seconds: 5.0         # how long to passively sniff
+  scpi_ports: [5025, 30000]      # raw-SCPI ports to probe when identifying a peer
 ```
 
 Omit the block entirely if your rig is all USB — it defaults on but finds nothing
-to do. It's gated behind `auto_discover_instruments`, so turning discovery off
-turns this off too.
+to do.
+
+The two halves are gated separately, on purpose. **Adopting** undeclared
+instruments needs both `ethernet.enabled` and `auto_discover_instruments`, but
+**routing to instruments you declared** needs only `ethernet.enabled`. So
+setting `auto_discover_instruments: false` stops the rack picking up new boxes
+without cutting off the TCPIP devices already in your config — turning it off
+used to look like "No route to host" on a declared instrument.
 
 ## Safety abort-limits — `safety:`
 
@@ -218,6 +233,16 @@ safety:
 
 Limits are armed at boot. A test can also arm its own scoped limits at runtime;
 those are additive.
+
+`threshold` must be a finite number (no `NaN`/`.inf`, and `true`/`false` are
+rejected) — an unorderable threshold would arm and then never compare true. A
+malformed entry is skipped on its own and logged, so one typo never disarms the
+rest of the rig.
+
+**A path that isn't in the catalog is still armed, and says so at INFO rather
+than failing.** That is deliberate, for a hot-plug device or a signal that only
+appears mid-run — but it means a misspelled path arms a limit that can never
+trip. After editing limits, check the rack log for that line.
 
 ### Bidirectional supplies: one limit per direction
 
@@ -254,5 +279,16 @@ just uses the one direction that matters (`op: ">="` for an upper ceiling,
 ### Validate before you run
 
 ```bash
-guppi rack config check      # validates the config (ids, driver types, YAML) without connecting
+guppi rack config check              # parse, schema, dependencies, and address visibility
+guppi rack config check --no-scan    # the same, without probing any hardware
 ```
+
+It checks more than the YAML: device shape (with the same code the boot path
+uses), that every `type:` resolves, config values against each driver's
+signature, the driver's own `validate_config`, and any missing optional
+dependency. **By default it also scans the bench** and warns about a declared
+address nothing answered on — pass `--no-scan` to skip that. It exits 1 on
+errors, 0 on warnings alone.
+
+Scan with the rack **stopped**: a running rack holds its instruments, so they
+won't appear and the check will report them as unreachable.

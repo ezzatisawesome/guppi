@@ -51,7 +51,32 @@ dropped, and the next one through carries how many were suppressed —
 "The same message" means the same logger, level, and wording, with the same
 *identifying* values — a device id, address or command. Measurements don't
 count, so `psu1` at 24.5 Hz and then 25.1 Hz is one line, while `psu1` and
-`psu2` are always two. Anything with a traceback is never held back.
+`psu2` are always two. Suppression tracks the last 512 distinct messages.
+
+**A traceback does not exempt a line** — only the first occurrence carries its
+traceback, and the repeats are collapsed like any other. (An earlier exemption
+was simply wrong: pyvisa logs a full traceback on *every* connect attempt, so a
+dozen reconnects buried the log in hundreds of lines.) What is never suppressed
+is `CRITICAL`.
+
+## Never run Guppi under sudo
+
+If an instrument needs a permission fix, **don't reach for `sudo`** — not on
+`guppi rack`, not on the `guppi` CLI. It appears to work and leaves a mess:
+every instrument ends up root-owned, so the problem returns for the next
+person; the rack runs with privileges it has no use for; and a config saved
+that way becomes root-owned, locking the non-root rack out of its own
+`rig_config.yml`.
+
+The supported fix for USB permissions is to **reinstall the rack**, which
+refreshes the udev rule. Everything the rack genuinely needs elevated — owning
+a USB node, adding an IP alias — it already does through narrow, validated
+helpers installed for exactly that purpose.
+
+If you must run the installer with sudo, run it from your own login
+(`sudo guppi update`), never from inside a `sudo -i` root shell: the installer
+reads the invoking user to decide whose `~/.guppi` to set up, and a root shell
+makes it build the install for root.
 
 ## Install failed partway
 
@@ -89,9 +114,19 @@ The installer is idempotent — fix the cause and re-run it. Common causes:
   segment).
 - A USB instrument visible to the OS but missing from the scan can be a
   permission problem: the rack installer grants serial/USB access via udev
-  rules and applies them to already-attached devices. If the installer printed
-  a udev warning, replug the instrument (or reboot) so the rules apply, then
-  restart `guppi rack`.
+  rules and applies them to already-attached devices. The rack also tries to
+  re-own a mis-owned node itself at connect time, and says so in the log when
+  that worked — so often there is nothing to do. If it couldn't, the error says
+  "present on the USB bus but access denied". Re-run the installer to refresh
+  the rule, or apply it to what's already attached without replugging:
+  `sudo udevadm trigger --subsystem-match=usb --action=add`. Then restart
+  `guppi rack`. Don't "fix" it by running the rack with sudo (see above).
+- A **networked** instrument that won't appear is usually not a Guppi problem
+  but an addressing one, and "No route to host" means nothing answered ARP on
+  that subnet. The rack says which of three things is wrong — the port has a
+  static IP (pin it with `ethernet.iface:`), nothing has aliased onto the
+  subnet yet, or there's no free wired port. Read its IP off the front panel
+  and declare it rather than adding aliases by hand.
 - Separate rack machine: it must reach the hub — `curl http://<hub>:8000/health`
   from the rack box. If you paired against a raw LAN IP and the hub's address
   changed with a DHCP lease, edit `~/.guppi/config.env` to the `.local` mDNS
@@ -121,7 +156,12 @@ The installer is idempotent — fix the cause and re-run it. Common causes:
 
 Guppi assumes 8000 (hub), 4222/9222 (NATS), 3010 (PostgREST), and Postgres on
 its distro default. If something else owns one of these, stop it or ask in an
-issue — ports aren't configurable in v0.
+issue — those aren't configurable in v0.
+
+The rack additionally binds its health endpoint on **127.0.0.1:8080**, and that
+one *is* configurable with `RACK_HOST` / `RACK_PORT`. "port 8080 is already in
+use" almost always means a rack is already running: stop it
+(`pkill -f src/main.py`) rather than moving the port.
 
 ## Starting over
 
