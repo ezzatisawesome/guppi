@@ -12,8 +12,8 @@ guppi upload run3.csv               # store it
 
 Each column becomes a signal named `<device>.<column>` — `run3.voltage`,
 `run3.current` — where the device defaults to the file name (`--device` to
-choose). The upload also lists as a recording named after the file, spanning
-its time range, so it shows up with the rig's runs. Uploading the same file
+choose). Add `--recording` to also list the file as a recording — a session on
+the timeline, named after the file and spanning its time range. Uploading the same file
 again does nothing: the hub recognizes the bytes.
 
 A file is stored all at once or not at all — if anything goes wrong partway,
@@ -26,7 +26,8 @@ guppi uploads                 # list them, with ids
 guppi uploads rm 3f2a91c0     # delete one (an id prefix is enough)
 ```
 
-That removes the upload's samples and its recording, and nothing else. If two
+That removes the upload's samples (and its session, if it made one), and
+nothing else. If two
 uploads wrote into the same signals over overlapping times, their data can't be
 told apart, so deleting just one of them is refused.
 

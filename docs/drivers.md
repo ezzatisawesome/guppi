@@ -304,15 +304,20 @@ that is intentionally unpowered).
 **Setup goes in `__enter__`, and it re-runs when the device comes back.**
 Whatever the protocol, a device that answers again after failed reads has
 usually been power cycled: an instrument back in local mode, an I2C board
-behind a live USB adapter, a CAN node that rebooted. Whenever a device reads
-successfully after one or more failed reads, quarantined or not, the rack
-calls `on_reconnect()`, which by default re-runs your `__enter__`, then drops
-that tick's samples (they were read before the setup was re-applied). Raising
+behind a live USB adapter, a CAN node that rebooted. When a device that was
+quarantined (5 failed reads in a row) reads again, the rack calls
+`on_reconnect()`, which by default re-runs your `__enter__`, then drops that
+tick's samples (they were read before the setup was re-applied). Raising
 counts as a failed read, which is right while the part is still booting. So
 put everything your driver writes to the device on connect (remote mode, pin
 directions, charger limits, a clock's hour mode, forcing a safe state) in
 `__enter__`, keep it safe to repeat, and never energize anything there.
-Override `on_reconnect()` only for setup that must not repeat.
+
+A single failed read is a glitch, not an outage, so the default never re-runs
+`__enter__` for one. If your part can brown out faster than quarantine (an I2C
+chip on a shared rail), write your own `on_reconnect()`: it is then called
+after *any* failed read, so make it cheap — read one register to see whether
+the chip actually reset, and re-apply setup only if it did.
 
 **`capabilities()` / `invoke(name, params)`** — writable controls (set a
 voltage, toggle an output). Each `DeviceCapability` declares a name and a

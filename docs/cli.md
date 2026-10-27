@@ -113,7 +113,7 @@ For `--bundle`, `EXECUTION` may be a prefix; omit it to take the latest run.
 ### Upload data files
 
 ```
-guppi upload FILE… [--dry-run] [--rig R] [--device NAME] [--name NAME] [--no-recording]
+guppi upload FILE… [--dry-run] [--rig R] [--device NAME] [--recording [--name NAME]]
                    [--tz ZONE] [--start TIME] [--time-column COL] [--time-format FMT]
                    [--layout wide|long] [--delimiter D] [--decimal .|,] [--skip-rows N]
                    [--unit COL=UNIT]… [--encoding ENC] [--format csv]
@@ -123,7 +123,8 @@ guppi uploads rm <upload id> [--rig R]     # take one back out, to redo it
 
 `upload` puts data files (CSV today) into the rig's stored history, on a local
 hub or the cloud alike. Each column becomes `<device>.<column>` (the device
-defaults to the file name) and the file lists as a recording. Delimiter,
+defaults to the file name); `--recording` also lists the file as a session on
+the timeline. Delimiter,
 decimal comma, header, units, layout and the time column and format are
 detected — `--dry-run` shows what was picked and writes nothing. Times without
 a zone are read in this computer's zone (`--tz` to change); elapsed-time files
