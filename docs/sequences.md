@@ -50,7 +50,23 @@ after the rig has acted, so steps run strictly in order.
 | `await rig.annotate(msg)` | Drop a note on the telemetry timeline at this moment. Blank text does nothing. |
 | `await rig.run(label)` | Run another button on this board, inline (by label or node id). |
 
-`read` is the only call that returns rig data. There is no batched read and no
+`read` returns a signal's value. A command that answers with data returns it
+as `.result` — e.g. any scope measurement:
+
+```js
+const r = await rig.send("scope1.measure", { measurement: "vpp", channel: 1 });
+rig.log(`ch1: ${r.result.value} ${r.result.unit}`);   // value is null if the scope can't measure it
+```
+
+On a Keysight InfiniiVision scope, `measure` takes `vavg`, `vrms`, `vrms_ac`,
+`vpp`, `vmax`, `vmin`, `vamplitude`, `vtop`, `vbase`, `overshoot`, `preshoot`,
+`frequency`, `period`, `rise`, `fall`, `pwidth`, `nwidth`, `duty`, `nduty`;
+`measure_between` takes `delay` or `phase` with `channel` and `channel2`; and
+`query` runs any read-only SCPI query (`{ command: ":MEASure:VPP? FUNCtion" }`
+→ `.result.response`). Measurements run on what is on screen, so set the
+timebase first.
+
+There is no batched read and no
 `waitFor(condition)` — to wait on a state, loop `read` + `sleep` with a bounded
 number of tries and fail if it never arrives.
 

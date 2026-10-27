@@ -73,6 +73,25 @@ example `type: BK9115` drives the **9115, 9115B, 9116, and 9117**. Scanning from
 **Instruments** picks the right driver for you; you only type `type:` by
 hand when writing config yourself — use the family driver name for any member.
 
+#### Streaming scope measurements
+
+A Keysight InfiniiVision scope streams each channel's frequency on its own. To
+stream other measurements, list them as `channel.measurement`:
+
+```yaml
+- id: scope1
+  type: KeysightInfiniiVision3000T
+  measurements: ["1.vpp", "1.vrms", "2.vavg", "2.rise"]
+```
+
+Each becomes a normal signal (`scope1.1.vpp`) you can plot, record and bind,
+and costs one query per tick. The choices are `vavg`, `vrms`, `vrms_ac`, `vpp`,
+`vmax`, `vmin`, `vamplitude`, `vtop`, `vbase`, `overshoot`, `preshoot`,
+`frequency`, `period`, `rise`, `fall`, `pwidth`, `nwidth`, `duty`, `nduty`.
+On the **Instruments** page this is a channel × measurement tick grid, and a
+change applies to the running rack straight away — no restart. Measurements
+run on what is on screen, so set the timebase first.
+
 ### Shape 2 — driver-owned transport (CAN/I²C/SPI/HTTP boards, DUTs)
 
 No `connection:` block. The **driver owns the link** — it opens,
