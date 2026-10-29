@@ -158,6 +158,22 @@ if [ "$COMPONENT" = rack ]; then
   exec bash "$GUPPI_HOME/src/packages/rack/install.sh" "$@"
 fi
 
+# ── Rack-too (the default) ──────────────────────────────────────────────────
+# The documented common case is hub AND rack on one Pi, and getting there used
+# to mean a second curl|bash plus answering a pairing question whose answer was
+# already determined ("which hub?" — this one). The source for both components
+# is in the tree we are about to lay down, so a hub install finishes the job:
+# it installs the rack and points it at the hub here, with nothing to answer.
+# `--no-rack` (or GUPPI_WITH_RACK=0) keeps a hub-only box hub-only — a split
+# deploy, or a hub that is not wired to any instruments.
+WITH_RACK="${GUPPI_WITH_RACK:-1}"
+_args=()
+for _a in "$@"; do
+  case "$_a" in --no-rack) WITH_RACK=0 ;; *) _args+=("$_a") ;; esac
+done
+set -- ${_args[@]+"${_args[@]}"}
+unset _args _a
+
 # ── Uninstall ────────────────────────────────────────────────────────────────
 # Reverses everything this installer wrote. Data (the database and
 # /var/lib/guppi) survives unless GUPPI_PURGE_DATA=1 — an uninstall shouldn't
@@ -973,22 +989,90 @@ echo "$GUPPI_REF" > "$GUPPI_ETC/version"
 echo "   hub verified (started, answered on :8000, stopped)"
 
 IP=$(hostname -I 2>/dev/null | awk '{print $1}')
+# Prefer the mDNS name: it survives a DHCP lease change, a raw IP does not.
+# But only offer it when mDNS is ACTUALLY resolvable here — avahi ships on
+# Raspberry Pi OS and is absent from a plain Debian/Ubuntu server, and this
+# installer does not add it. Printing "<host>.local" on a box without avahi
+# sends the operator to a name that never resolves, on the one screen where
+# they have nothing else to go on.
+MDNS=""
+if systemctl is-active --quiet avahi-daemon 2>/dev/null; then
+  MDNS="$(hostname -s 2>/dev/null || true)"
+  [ -n "$MDNS" ] && MDNS="${MDNS}.local"
+fi
+# Are we about to install the rack too? Only on a FRESH install: an upgrade
+# must not quietly add a component this box never had. Getting this wrong is
+# not cosmetic — the summary below advertises `guppi up`, which needs both.
+RACK_NEXT=0
+if [ "$WITH_RACK" = 1 ] && [ ! -x /usr/local/bin/guppi-rack ] \
+   && [ "$UPGRADING" != 1 ]; then RACK_NEXT=1; fi
 echo ""
 echo "✓ Guppi $GUPPI_REF installed."
 echo ""
 echo "  Start the bench (foreground — logs in your terminal, Ctrl-C stops it):"
 echo ""
-echo "    guppi hub                 # NATS + PostgREST + hub"
+if [ "$RACK_NEXT" = 1 ] || [ -x /usr/local/bin/guppi-rack ]; then
+  # Both components on this box: one command runs both, in the right order,
+  # with a pane each and one Ctrl-C for the pair.
+  echo "    guppi up                  # hub + rack together (a pane each)"
+  echo "    guppi hub                 # or just the hub, on its own"
+else
+  echo "    guppi hub                 # NATS + PostgREST + hub"
+fi
 echo ""
-echo "  Dashboard:  http://${IP:-<this-host>}:8000   (while the hub runs)"
-echo "  Bench:      curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh \\"
-echo "                | sudo bash -s -- rack"
-echo "              on the instrument machine, then run: guppi rack"
-echo "              (this box: same command — it finds the tree already here,"
-echo "               and the rack auto-claims over loopback, no code to type)"
+if [ -n "$MDNS" ]; then
+  echo "  Dashboard:  http://${MDNS}:8000   (while the hub runs)"
+  echo "              http://${IP:-<this-host>}:8000   (if that name doesn't resolve)"
+else
+  echo "  Dashboard:  http://${IP:-<this-host>}:8000   (while the hub runs)"
+  echo "              this box has no mDNS (avahi) — the address changes if its"
+  echo "              DHCP lease does. 'sudo apt install avahi-daemon' gets you"
+  echo "              a stable http://$(hostname -s 2>/dev/null || echo bench).local:8000"
+fi
+if [ "$RACK_NEXT" = 1 ]; then
+  echo "  Bench:      installing the rack on this box next (see below)"
+else
+  echo "  Bench:      curl -fsSL https://raw.githubusercontent.com/$REPO/main/install.sh \\"
+  echo "                | sudo bash -s -- rack"
+  echo "              on the instrument machine, then run: guppi rack"
+  echo "              (this box: same command — it finds the tree already here,"
+  echo "               and the rack auto-claims over loopback, no code to type)"
+fi
 echo "  Upgrade:    stop the hub, then: guppi update"
 echo ""
 echo "  NOTE: nothing auto-starts on boot — after a reboot, run guppi hub again."
+if [ "$RACK_NEXT" = 1 ]; then
+  # Fresh install, rack not here yet: finish the job. The rack installer is in
+  # the tree we just verified and inherits SUDO_USER, so the run user matches.
+  #
+  # GUPPI_AGENT_URL is set rather than left to the menu: we KNOW where the hub
+  # is, because we just installed it on this box. The hub is not running yet
+  # (nothing auto-starts), so the rack's loopback auto-detect would miss and ask
+  # a question with one right answer. GUPPI_HUB_JUST_INSTALLED tells the rack
+  # installer that an unreachable loopback hub is expected here, so it doesn't
+  # warn about something it is itself in the middle of causing.
+  echo ""
+  echo "  Now installing the rack (the instrument side) on this box."
+  if [ -z "${GUPPI_AGENT_URL:-}" ] && [ -z "${NATS_URL:-}" ]; then
+    # Nothing was asked for, so point it at the hub we just installed here.
+    # This is the whole reason the pairing question can be skipped: we know the
+    # answer. An EXPLICIT GUPPI_AGENT_URL (or NATS_URL) is the operator telling
+    # us otherwise — a hub here but a rack reporting elsewhere is a real
+    # arrangement — and silently overwriting it would be the installer
+    # overruling the person running it.
+    echo "  It is pointed at the hub here — no question to answer, no code to type."
+    export GUPPI_AGENT_URL="http://127.0.0.1:8000"
+    # Scoped to the case we created: the hub here is installed but not running
+    # (nothing auto-starts), so the rack installer should not warn about it.
+    export GUPPI_HUB_JUST_INSTALLED=1
+  else
+    echo "  Keeping the agent you asked for: ${GUPPI_AGENT_URL:-$NATS_URL}"
+  fi
+  echo "  Hub-only box? Re-run the installer with --no-rack."
+  echo ""
+  exec bash "$GUPPI_HOME/src/packages/rack/install.sh"
+fi
+
 if [ "$UPGRADING" = 1 ] && [ -x /usr/local/bin/guppi-rack ]; then
   echo ""
   if [ "${GUPPI_UPDATE:-0}" = 1 ]; then

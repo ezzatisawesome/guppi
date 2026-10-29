@@ -8,6 +8,8 @@ works against a local hub and Guppi Cloud.
 ```
 guppi upload run3.csv --dry-run     # read it, show what would be stored
 guppi upload run3.csv               # store it
+guppi upload book.xlsx              # a workbook: one upload per sheet
+guppi upload logs.zip               # an archive: one upload per file in it
 ```
 
 Each column becomes a signal named `<device>.<column>` — `run3.voltage`,
@@ -34,8 +36,9 @@ told apart, so deleting just one of them is refused.
 
 ## From the browser
 
-Drag a CSV anywhere in Guppi and it goes to the rig you're looking at; a rig's
-own page also has an **Upload data** button. Either way the hub reads the file
+Drag a CSV, a workbook or a zip anywhere in Guppi and it goes to the rig you're
+looking at. A rig's own page has an **Upload data** button; on a local bench it
+is in the rig menu, next to **Instruments**. Either way the hub reads the file
 first and reports what it found — the format it picked, the time column, every
 signal with its unit and sample count, and any warnings — and nothing is stored
 until you confirm. The dialog is a thin client over the same
@@ -49,11 +52,49 @@ window the file covers. And an elapsed-time file has no absolute time in it, so
 the hub refuses it until you say when time zero was; the dialog asks for that
 inline and re-reads the file.
 
+## Workbooks and archives
+
+An Excel workbook (`.xlsx`, `.xlsm`) uploads like a CSV — the sheet is read by
+the same reader, so everything below applies to it too. Dates come through as
+real instants (Excel already resolved them), so no `--time-format` is needed.
+
+A `.zip`, `.tar.gz` or `.csv.gz` also uploads directly, and the rule is simple:
+
+> **Uploading an archive is the same as unpacking it and uploading each file
+> in it.**
+
+Every file inside becomes **its own upload**, named after itself and prefixed
+with its own name, with its own checksum and its own recording. So a logger's
+archive that grows by a file a day can just be re-sent — only the new file is
+stored:
+
+```
+guppi upload logs.zip            # 24 hourly logs → 24 uploads
+guppi upload logs.tar.gz
+guppi upload run3.csv.gz         # exactly the same as run3.csv
+```
+
+A workbook's sheets work the same way: one upload per sheet. A single-sheet
+workbook, or an archive holding one file, behaves exactly like that one file.
+
+| | |
+|---|---|
+| Signal prefix | each file's own name — `logs.zip` holding `09.csv` gives `09.voltage`. `--device bench` overrides it for **all** of them, which merges same-named columns |
+| One file out of it | `--member 09.csv`, or a sheet: `--member 'Pack A'` |
+| Not data | a README, an image, a `__MACOSX` folder, an archive inside the archive — skipped and listed, not an error |
+| One bad file | reported on its own line; the others still upload |
+
+Limits exist because an archive is untrusted input: the 512 MB limit applies
+to the **unpacked** total (not the archive's own size), at most 256 files or
+sheets per upload, no archives inside archives, and a file that expands more
+than 200× is refused as a decompression bomb. A member's name is never used as
+a path on disk, so a crafted archive can't write anywhere.
+
 ## What it reads
 
-CSV today; more formats are coming. Everything below is **detected**, and
-`--dry-run` shows what was picked, so you only pass an option when the guess is
-wrong.
+CSV and other delimited text, Excel workbooks, and either inside an archive.
+Everything below is **detected**, and `--dry-run` shows what was picked, so you
+only pass an option when the guess is wrong.
 
 | | Detected | Option |
 |---|---|---|
@@ -66,6 +107,7 @@ wrong.
 | Time column | named time/timestamp/date/t/elapsed…, else the first column; separate `Date` + `Time` columns are joined | `--time-column Stamp` |
 | Time format | see below | `--time-format epoch_ms` |
 | Encoding | UTF-8 (with or without Excel's BOM), UTF-16 (Excel's "Unicode Text"), else Windows-1252 | `--encoding latin-1` |
+| Format | from the file's contents, not its name — a zip emailed as `.csv` still unpacks | `--format csv` |
 
 ### Times
 
@@ -126,7 +168,8 @@ stays flat whatever the size, and `guppi upload` compresses the file on the way
 and shows a running count while the hub works. Roughly a million points a
 second on a laptop hub — a 10-million-point file is about ten seconds. The
 limit is 512 MB per file (about 35 million points in a typical wide file);
-split anything larger, and each part becomes its own upload.
+split anything larger, and each part becomes its own upload. For an archive
+the limit is on everything inside it, added up.
 
 ## Other ways in
 
@@ -138,6 +181,12 @@ same names (`time_format`, `skip_rows`, `unit=COL=UNIT`, `dry_run=true`, …):
 curl -X POST "http://bench.local:8000/rigs/<rig>/uploads?filename=run3.csv&tz=Europe/Berlin" \
      --data-binary @run3.csv
 ```
+
+A single-table file answers with that upload's report. An archive or a
+multi-sheet workbook answers with an envelope instead — `{"status":
+"archive", "container": "zip", "uploads": [ … ], "skipped": [ … ]}` — one
+report per file inside, each with its own `status` (`uploaded`, `duplicate` or
+`error`).
 
 A local hub needs no sign-in. In Guppi Cloud an upload needs a signed-in
 session (`guppi login`); API keys can't upload.
