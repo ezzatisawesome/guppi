@@ -79,14 +79,14 @@ a config before booting with `guppi rack config check`.
 
 ## Run tests
 
-Tests are plain Python files using OpenHTF, dropped into the rig's workspace.
-Your configured instruments are injected as plugs (`PSU1`, `LOAD1`, …), and
-helpers cover parameter sweeps, operator prompts, waveform capture, and
-watchdog safety limits. Run them from the dashboard, or from any machine with
+Tests are plain OpenHTF files, dropped into the rig's workspace. Your
+configured instruments are plugs (`from guppi import plugs` → `plugs.PSU1`, …),
+and `guppi` helpers cover parameter sweeps, operator prompts, waveform capture,
+and watchdog safety limits. Run them from the dashboard, or from any machine with
 the `guppi` CLI:
 
 ```
-guppi run <test> [--rig R]   # plan, approve, run; answer prompts inline
+guppi run <test> [--rig R]   # run a test; answer prompts inline
 guppi results [-o DIR]       # export the latest run: run.json + measurements.csv + scope/
 guppi abort                  # stop the running test
 guppi rigs                   # list paired rigs

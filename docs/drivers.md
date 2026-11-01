@@ -349,8 +349,13 @@ DeviceSignal(name="fault", signal_type="string", string_kind="event")   # "overc
 A `"state"` is shaded as a span between samples; an `"event"` is marked as a pin
 at its own instant. It cannot be inferred — the samples look identical either way
 — so a signal that doesn't say is drawn as events, which is the reading that
-can't claim a duration that never happened. Either way, a channel that turns out
-to carry many lines per window is shown as a scrolling log instead. `direction` gates controls: `"in"` (measured — the default) is
+can't claim a duration that never happened. A busy text channel stays pins —
+crowded labels are hidden, every pin stays placed. For lines meant to be *read*
+rather than plotted — a DUT's serial console, say — use `string_kind="log"`:
+the data view shows the channel as a scrolling log list (see
+[Logging](#logging-from-a-driver)).
+
+`direction` gates controls: `"in"` (measured — the default) is
 always read-only, even if a matching write capability exists; use `"out"`
 (commanded) or `"bidir"` (measured *and* commandable) for anything a user
 should be able to set from the dashboard.
@@ -457,6 +462,42 @@ load, instead of a confusing failure at runtime.
 (channel discovery, forcing a safe state) in `__enter__`. The server enters
 the driver after connecting; `__exit__` stays a no-op because the server owns
 the connection lifecycle.
+
+## Logging from a driver
+
+Use Python's `logging`, exactly as you would anywhere else:
+
+```python
+import logging
+log = logging.getLogger(__name__)
+
+class MyBoard(Device):
+    def measure(self, name):
+        ...
+        log.warning("CRC mismatch on reg %#x, retrying", reg)
+```
+
+Every line at INFO and above is recorded as telemetry on the device's **log
+channel**, `<device_id>.log` — the same store, clock and time axis as its
+measurements. You don't name the device: any line logged while the rack is
+serving it (sampling, running a command, opening the connection), or from
+inside one of your driver's own methods (a test calling `psu.set_voltage()`),
+is that device's, whichever module logged it. Lines logged outside any device go
+to `system.log`, as do a test's own `test.logger` lines.
+
+Read them in a data view (below) or from the terminal:
+`guppi query psu1.log --since 1h --format json` — each row's `value` is a JSON
+line `{"level", "logger", "msg"}`.
+
+To read them, drop the log channel onto a data-view panel: the lines appear as
+rows under the traces, warnings and errors colored, and hovering a row marks its
+moment on the chart. DEBUG stays out of telemetry (that is where the transport
+logs every SCPI write); it goes to `~/.guppi/logs/rack.log` and, during a test
+run, into the run's full log.
+
+Don't name a signal `log` unless it *is* the device's log — the name is reserved
+for it. Declaring your own `log` signal (with `string_kind="log"`) merges what
+it reports with the logged lines on the one channel.
 
 ## Two connection shapes
 

@@ -22,7 +22,7 @@ upgrading (`guppi update`) and pinning a version.
 - [**Buttons & sequences**](sequences.md) — scripted dashboard buttons: the
   `rig` API, composing buttons with `rig.run`, prompts, recording, abort.
 - [**Writing tests**](openhtf-authoring-guide.md) — authoring OpenHTF test
-  scripts to Guppi standards: the `TEST_PHASES` contract, measurements and
+  scripts to Guppi standards: the plain-OpenHTF contract, measurements and
   limits, prompts, the three safety layers, declarative sweeps, and capturing
   waveforms/sweep metrics by reference.
 - [**Uploading data files**](uploading-data.md) — bring CSV data from loggers,

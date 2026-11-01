@@ -244,7 +244,7 @@ within seconds. See [Dashboards and data views as files](cli.md#dashboards-and-d
 
 ```
 guppi rigs                # list paired rigs — a good first check
-guppi run smoke-test      # derive the plan, approve, run; prompts answered inline
+guppi run smoke-test      # runs tests/smoke-test.py; prompts answered inline
 guppi runs --bundle       # write the latest run bundle (run.json + CSVs + scope/)
 ```
 

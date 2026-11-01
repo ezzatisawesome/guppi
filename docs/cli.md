@@ -98,10 +98,17 @@ guppi runs [EXECUTION] [--bundle [DIR]] [--limit N] [--rig R]
   Use these paths in dashboards, sequences and queries. `--values` adds each
   signal's current value, read live from the rig (narrow it with a filter:
   `guppi catalog psu1 --values`).
+- A command that fails says so in the terminal, and also leaves a trace:
+  `~/.guppi/logs/cli.log` (UTC, the telemetry clock) and — when it was about a
+  rig the hub can reach — a line on that rig's `system.log`, so the failure
+  sits on the timeline next to the readings. Only the command name and the
+  error are kept, never the arguments.
 - `query` — stored history. Times are ISO 8601, `now`, or a span ago
   (`15m`, `2h`, `3d`). Rolled-up rows carry `v_min`/`v_max`, so a short spike
   survives a long window; `--buckets raw` returns raw samples (capped at
-  100k). `--format csv` is ready for pandas:
+  100k). Text channels (phases, notes, logs such as `psu1.log`) are never
+  rolled up: their rows are the raw samples, `value` the string. `--format csv`
+  is ready for pandas:
   `guppi query psu1.1.voltage psu1.1.current --since 12h --format csv > soak.csv`.
 - `runs` — test runs, newest first; with an id, one run in full, including
   its measurements and time window; `--bundle [DIR]` writes that run's
@@ -143,18 +150,19 @@ path to a `.py` file — relative, `~`, or absolute (single-box benches, where
 the CLI and rig share a disk). The script's own directory is importable, so a
 test living in your firmware repo can import sibling modules and read data
 files next to it. Omit it to pick from the rig's saved tests (arrow-key
-menu, `1-9` jump). The CLI derives the plan, shows it, asks for approval,
-then runs — any `prompt()` in the script is answered inline in your terminal.
+menu, `1-9` jump). It starts right away — any `prompt()` in the script is
+answered inline in your terminal.
 
 - `--rig R` — which rig to run on (default: `GUPPI_RIG`, or the only paired rig).
 - `--dut SERIAL` — record the DUT serial on the execution.
 - `--step` — pause for confirmation before every phase (debug overlay; the
-  gates never appear in the plan or results).
+  gates never appear in the results).
 - `--resume-from PHASE` — re-run a finished run from this phase onward
   (see [Writing tests §8](openhtf-authoring-guide.md#8-sweeps-and-resume)).
-- `-y` / `--yes` — skip the plan-approval prompt (unattended runs).
-
-`guppi abort` stops the running test; its teardown and `safe_shutdown()` run.
+`guppi abort` (or Ctrl-C during `guppi run`) stops the running test: the
+running phase's `finally` / `safe_shutdown()` runs, and the run reads
+`stopping` until that phase has actually exited. If it's still stuck 10 s
+later, the rack de-energizes the rig itself.
 
 ## Dashboards and data views as files
 

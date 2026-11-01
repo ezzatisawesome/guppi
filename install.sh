@@ -776,7 +776,7 @@ build_venv() {  # $1=dir  $2=verify-cmd (run in $dir as $RUN_USER)  $3=label
 # $RUN_USER, so the tree must be theirs before syncing.
 chown -R "$RUN_USER:" "$GUPPI_HOME"
 build_venv "$GUPPI_HOME/src/packages/agent" \
-  '.venv/bin/python -c "import fastapi, uvicorn, asyncpg, openhtf"' "hub/agent"
+  '.venv/bin/python -c "import fastapi, uvicorn, asyncpg"' "hub/agent"
 
 # Values are QUOTED: guppi-hub sources this file in bash, and the DSN's '&'
 # would otherwise background half the line.

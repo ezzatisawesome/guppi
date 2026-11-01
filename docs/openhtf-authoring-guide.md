@@ -1,7 +1,7 @@
 # Writing OpenHTF tests to Guppi standards
 
 A complete, opinionated guide to authoring OpenHTF test scripts that run well in
-the Guppi environment — the contract, the injected vocabulary, the driver API a
+the Guppi environment — the contract, what `guppi` provides, the driver API a
 test author actually touches, safety layering, performance rules, and a deep
 section on driving the **Keysight MP4300 Solar Array Simulator as an irradiance
 source**.
@@ -13,19 +13,19 @@ This is the practitioner's companion to
 
 ## 0. Mental model — what actually runs
 
-A Guppi test is **a plain Python file in the rig's workspace under `tests/`**.
+A Guppi test is **a plain OpenHTF file in the rig's workspace under `tests/`**.
 There is no test registry and no framework subclass to inherit. The rack:
 
 1. Reads the file from *its own disk* (the workspace) — the script is never
    shipped over the wire with the run command; `test_path` names a file and the
-   rack reads it, so an edit between plan-approval and start fails loudly instead
-   of running different code silently.
-2. `exec()`s it in a locked-down namespace (see §3).
-3. Pulls the module-level `TEST_PHASES` list out of the namespace.
-4. Builds `htf.Test(*TEST_PHASES)` and calls `test.execute(...)`.
-5. Binds every configured rig device as an OpenHTF **plug** — a live, already
-   connected driver instance shared across all phases.
-6. Streams the run live to the dashboard (phases, measurements, prompts,
+   rack reads it.
+2. Runs the module and takes the one module-level `htf.Test` it defines.
+3. Publishes the run document with every phase, measurement, unit and limit —
+   read from the real OpenHTF phases, before anything is energized.
+4. Calls `test.execute(...)`. Every rig device is available as an OpenHTF
+   **plug** (`guppi.plugs.PSU1`) — a live, already connected driver instance
+   shared across all phases.
+5. Streams the run live to the dashboard (phases, measurements, prompts,
    artifacts) as it runs, and persists the final record to your database.
 
 Key consequences you must design around:
@@ -36,21 +36,19 @@ Key consequences you must design around:
   State you set in phase 1 (an output enabled, a curve programmed) is still there
   in phase 2, and still there in the *next* run. This is why teardown discipline
   (§6) matters and why resume-from-phase (§8) works.
-- **The plan is derived from your measurements**, not written by hand. The phase
-  list + each phase's `@measures` limits become the plan shown in the UI/CLI
-  *before* the run starts. Put display truth in the measurement, never in prose.
-- **The trust surface is fixed.** Only the names in §3 are injected. Everything
-  else is stock Python.
-- **The process is long-lived; only the namespace is fresh.** Each run is
-  `exec()`d in a fresh namespace, but inside the *same* rack interpreter.
-  Anything that escapes the namespace persists across runs: a background
-  thread you start survives an abort (and still holds its port next run),
-  and imported helper modules stay cached in `sys.modules`, so edits to a
-  sibling helper need a rack restart to take effect. Stop background work —
-  servers, threads, sockets — in the phase's `finally` (§6). A test *may*
-  open a listening port (the "outbound-only" claim in §1 is about the Guppi
-  service, not your OS), but it must close it in `finally` for the same
-  reason.
+- **What the panel shows comes from your measurements.** The phase list + each
+  phase's `@measures` limits are what the UI/CLI show from the first moment of
+  the run. Put display truth in the measurement, never in prose.
+- **Only plain OpenHTF and `from guppi import ...`.** Nothing is injected; the
+  file lints and imports like any Python module.
+- **The process is long-lived.** Each run loads the file afresh, but inside
+  the *same* rack interpreter. Anything that escapes the module persists across
+  runs: a background thread you start survives a stop (and still holds its port
+  next run), and imported helper modules stay cached in `sys.modules`, so edits
+  to a sibling helper need a rack restart to take effect. Stop background work —
+  servers, threads, sockets — in the phase's `finally` (§6). A test *may* open a
+  listening port (the "outbound-only" claim in §1 is about the Guppi service,
+  not your OS), but it must close it in `finally` for the same reason.
 
 ---
 
@@ -59,7 +57,7 @@ Key consequences you must design around:
 | Thing | Value |
 |---|---|
 | Python | `>= 3.12` |
-| OpenHTF | rack pins `openhtf>=1.0`; agent pins `openhtf>=1.6` |
+| OpenHTF | rack pins `openhtf>=1.0` |
 | Transport | pyvisa + pyvisa-py (pure-Python VISA; no NI-VISA needed on a Pi) |
 | Where tests live | rig workspace `tests/*.py` (e.g. `/home/guppi/workspace/tests/` on a Pi) |
 | Where hardware is declared | `rig_config.yml` (installed at `~/.guppi/rig_config.yml`) |
@@ -85,72 +83,68 @@ addressed by its rig id.
 
 ```python
 import openhtf as htf
-from openhtf import measures
 from openhtf.util import units
+from guppi import plugs
 
-@htf.plug(PSU=PSU1)
-@measures(htf.Measurement("vout").with_units(units.VOLT).in_range(4.9, 5.1))
-def check_rail(test, PSU):
-    PSU.set_voltage(1, 5.0)
-    PSU.set_output(1, True)
-    test.measurements.vout = PSU.measure_voltage(1)
+@htf.plug(psu=plugs.PSU1)
+@htf.measures(htf.Measurement("vout").with_units(units.VOLT).in_range(4.9, 5.1))
+def check_rail(test, psu):
+    psu.set_voltage(1, 5.0)
+    psu.set_output(1, True)
+    test.measurements.vout = psu.measure_voltage(1)
 
-TEST_PHASES = [check_rail]
+test = htf.Test(check_rail)
 ```
 
 Three rules, and that's the whole contract:
 
-1. **`TEST_PHASES`** — a module-level **flat list of plain phase functions**.
-   That list *is* the test. Nothing else is required — and nothing else is
-   accepted: the plan validator derives the plan from phase names, so
-   `htf.PhaseGroup`, subtests, and OpenHTF teardown hooks fail validation
-   ("phase names differ") even though stock OpenHTF supports them. This is
-   why abort-safe cleanup is a `try/finally` inside the phase (§6), not a
-   framework teardown hook.
-2. **Bind hardware with `@htf.plug(NAME=DEVICE_ID)`** — the config device id,
-   uppercased, is injected as a plug class. A device with `id: psu1` in
-   `rig_config.yml` is available as `PSU1`; `id: load1` → `LOAD1`; `id: sas1` →
-   `SAS1`. The left-hand name (`PSU=`) is just the parameter name inside your
-   function.
-3. **Declare limits in `@measures`** — `.in_range(lo, hi)`, `.equals(x)`,
-   `.with_units(units.VOLT)`, etc. The rack introspects these to derive the plan.
-   Building `htf.Test(*TEST_PHASES)` never *executes* a phase — but getting
-   `TEST_PHASES` out of your file means **exec'ing the whole module**, so the
-   module *body* runs at plan derivation, off-hardware. Keep top-level code
-   side-effect free: no file I/O, nothing that can raise. A missing data file
-   read at module level fails plan derivation with an opaque load error;
-   deferred into a setup phase it fails there with a clean, named failure.
+1. **One module-level `htf.Test`.** That object *is* the test, and the rack
+   runs it — so don't call `execute()` yourself (guard a local run with
+   `if __name__ == "__main__":`). Anything OpenHTF composes works:
+   `htf.PhaseGroup` (its teardown runs even when the run is stopped),
+   `htf.Subtest`, `PhaseOptions`, `test.configure(...)`.
+2. **Bind hardware with `@htf.plug(name=plugs.DEVICE_ID)`.** A device with
+   `id: psu1` in `rig_config.yml` is `plugs.PSU1` (`plugs.psu1` works too);
+   `id: load1` → `plugs.LOAD1`; `id: sas1` → `plugs.SAS1`. The left-hand name
+   (`psu=`) is just the parameter name inside your function.
+3. **Declare limits in `@htf.measures`** — `.in_range(lo, hi)`, `.equals(x)`,
+   `.with_units(units.VOLT)`, etc. The panel shows them from the first moment
+   of the run. Loading the file runs the whole module *body* before anything
+   is energized, so keep top-level code side-effect free: no file I/O, nothing
+   that can raise. A missing data file read at module level fails the run at
+   start; deferred into a setup phase it fails there with a clean, named
+   failure.
 
 ### What a plug actually is
 
-Inside your phase, `PSU` is the live, already-connected driver object — you
-call its Python methods directly (`PSU.set_voltage(1, 5.0)`), not through any
+Inside your phase, `psu` is the live, already-connected driver object — you
+call its Python methods directly (`psu.set_voltage(1, 5.0)`), not through any
 RPC or capability indirection. There is exactly one instance per device,
 shared across phases and runs.
 
 ---
 
-## 3. Injected vocabulary — the entire trust surface
-
-The executor's `_build_script_namespace` injects exactly this and nothing more:
+## 3. What `guppi` provides — the whole set
 
 | Name | Signature | Use |
 |---|---|---|
-| `openhtf` / `htf` | — | the OpenHTF module |
-| `time` | — | convenience (`time.sleep(...)`) |
-| `PSU1`, `LOAD1`, … | — | bound device plug classes (uppercased config ids) |
+| `plugs.PSU1`, `plugs.LOAD1`, … | — | the plug for each rig device, by its config id |
+| `sleep` | `(seconds) -> None` | `time.sleep` that a stop interrupts at once. Use it for every settle and soak: a plain `time.sleep(60)` holds a stop for the full minute, because OpenHTF can only interrupt a phase between Python bytecodes |
 | `capture_artifact` | `(path, waveform, phase=None) -> ref` | publish a **uniform numeric series** by reference (a scope trace, or one metric of a sweep), stamped with the run's `execution_id`. `waveform` must be `{"v": [floats], "sample_rate": float, "t0"?: float, "unit"?: str}`; **only `v` is stored** (compact f32) and the axis is rebuilt from `(t0, sample_rate, n)`. Any dict lacking `"v"` raises `KeyError`. Raises if no artifact store is configured. |
-| `safe_shutdown` | `() -> None` | de-energize every output on the rig. Use in an L2 teardown phase. |
-| `arm_guard` | `(path, op, threshold, min_duration=0.0) -> ids` | arm a **run-scoped** watchdog abort-limit (L1). The executor disarms exactly what it armed when the run ends — pass, fail, abort, or timeout (§6). |
+| `safe_shutdown` | `() -> None` | de-energize every output on the rig. Use it in a phase's `finally`. |
+| `arm_guard` | `(path, op, threshold, min_duration=0.0) -> ids` | arm a **run-scoped** watchdog abort-limit (L1). The rack disarms exactly what it armed when the run ends — pass, fail, stop, or timeout (§6). |
 | `grid` | `(**axes) -> list[point]` | build a Cartesian setpoint matrix |
 | `sweep` | `(points, apply, measure, *, settle_s=0.0, on_point=None) -> rows` | drive the matrix: command → settle → measure |
-| `prompt` | `(text, kind="confirm") -> Any` | pause the phase and ask a human/agent |
+| `prompt` | `(text, kind="confirm", timeout_s=None) -> Any` | pause the phase and ask a human/agent |
 
-`__builtins__` is present, so normal imports work (you can
-`from devices.psu.keysight_mp4300 import SasCurve` — see §9). Keep that power for
-data types and stdlib; don't reach around the injected safety vocabulary.
+Off the rack (a linter, a unit test of a helper), `sleep` is plain
+`time.sleep` and the rest raise `RuntimeError`, so the file always imports.
 
-Two more facts about the namespace: **`__file__` is set** to the script's
+Normal imports work (you can `from devices.psu.keysight_mp4300 import
+SasCurve` — see §9). Keep that power for data types and stdlib; don't reach
+around the safety vocabulary above.
+
+Two more facts about loading: **`__file__` is set** to the script's
 path, so `Path(__file__).parent` finds data files shipped next to the test;
 and **the script's own directory is put on `sys.path`**, so a sibling helper
 module (`from orbit_parser import ...` next to your test) imports directly.
@@ -166,15 +160,15 @@ Measurements are how a phase declares intent *and* renders pass/fail. Declare th
 limit in the decorator; assign the value in the body.
 
 ```python
-@measures(
+@htf.measures(
     htf.Measurement("vout").with_units(units.VOLT).in_range(4.9, 5.1),
     htf.Measurement("iout").with_units(units.AMP).in_range(0, 0.5),
     htf.Measurement("recovered").equals(True),
 )
-def characterize(test, PSU):
-    test.measurements.vout = PSU.measure_voltage(1)
-    test.measurements.iout = PSU.measure_current(1)
-    test.measurements.recovered = PSU.measure_voltage(1) > 4.5
+def characterize(test, psu):
+    test.measurements.vout = psu.measure_voltage(1)
+    test.measurements.iout = psu.measure_current(1)
+    test.measurements.recovered = psu.measure_voltage(1) > 4.5
 ```
 
 Rules that keep results clean:
@@ -185,9 +179,11 @@ Rules that keep results clean:
   the full data on the artifact plane (§7).
 - **One limit, one place.** If the panel should show `4.9–5.1 V`, that range
   lives in `.in_range(4.9, 5.1)`, not in a comment or a `prompt` string.
-- **Name measurements stably.** The plan validator compares phase names (ordered)
-  and per-phase measurement-name sets between the derived plan and the running
-  script; a rename mid-approval trips a loud mismatch, not a silent divergence.
+- **Name phases and measurements for what they are.** Each numeric measurement
+  streams as the telemetry channel `test.<phase>.<measurement>` (anything
+  outside `[A-Za-z0-9_-]` becomes `_`). The same names in two tests are the same
+  channel, and runs tell them apart — exactly like `psu1.1.voltage` across
+  sessions.
 
 ---
 
@@ -210,9 +206,9 @@ Guidance:
   manual stimulus, a value only the operator can read. An unattended run should
   fly through a prompt-free script.
 - `guppi run --step` inserts a confirm-gate before *every* phase as a debug
-  overlay; those gates never appear in the plan or the result phases.
-- A prompt raises `RuntimeError` if the run is aborted while waiting, so it
-  cooperates with abort.
+  overlay; those gates never appear in the result phases.
+- A stop releases a waiting prompt at once (the phase ends as stopped), and
+  `timeout_s=` raises `TimeoutError` when nobody answers in time.
 
 ---
 
@@ -229,40 +225,46 @@ Never rely on software to catch a microsecond fault. Layer your protection:
 Canonical shape of a phase that energizes:
 
 ```python
-@htf.plug(PSU=PSU1)
-@measures(htf.Measurement("peak_current"))
-def stress(test, PSU):
+@htf.plug(psu=plugs.PSU1)
+@htf.measures(htf.Measurement("peak_current"))
+def stress(test, psu):
     try:
-        PSU.set_current(1, 5.0)                       # L0: hardware current limit first
+        psu.set_current(1, 5.0)                       # L0: hardware current limit first
         arm_guard("psu1.1.current", ">", 5.5, min_duration=0.2)  # L1: run-scoped backstop
-        PSU.set_voltage(1, 5.0)
-        PSU.set_output(1, True)
-        time.sleep(0.5)
-        test.measurements.peak_current = PSU.measure_current(1)
+        psu.set_voltage(1, 5.0)
+        psu.set_output(1, True)
+        sleep(0.5)
+        test.measurements.peak_current = psu.measure_current(1)
     finally:
         safe_shutdown()                              # L2: de-energize no matter what
 ```
 
-**Why the `finally` must live inside the phase — abort semantics.** A manual
-abort raises an exception into the *currently running* phase's thread: that
-phase's `finally` blocks execute, but **every later phase in `TEST_PHASES` is
-skipped — including a trailing teardown phase**. The same applies to a phase
-timeout (§8). So a standalone teardown phase is the *normal-completion*
-off-path only; the abort off-path is the `try/finally` inside the energizing
-phase itself. Keep that `finally` **short and per-op fault-tolerant** (wrap
-each de-energize call in its own `try/except`): if the run doesn't finish
-within ~10 s of an abort, the executor escalates by re-killing the phase
-thread every few seconds — a `finally` wedged in slow driver I/O gets
-interrupted too. Two related facts: a guard trip (L1) de-energizes the rig
-*before* aborting the run, so it doesn't depend on your `finally`; and a hard
-kill (SIGKILL, power loss) bypasses Python entirely — which is why L0
-hardware limits are non-negotiable.
+**Why the `finally` must live inside the phase — what a stop does.** A stop
+(the panel's stop button, `guppi abort`, Ctrl-C under `guppi run`, or an L1
+guard trip) raises into the *currently running* phase's thread: that phase's
+`finally` blocks execute, but **every later plain phase is skipped — including
+a trailing teardown phase**. The same applies to a phase timeout (§8). So a
+standalone teardown phase is the *normal-completion* path only; the stop path
+is the `try/finally` inside the energizing phase itself (or a
+`htf.PhaseGroup(teardown=[...])`, which OpenHTF runs on a stop too).
+
+The raise lands only when the phase next runs Python. Inside a blocking call
+(a `time.sleep`, a slow instrument read) it waits for that call to return,
+which is why `guppi.sleep` exists. Until the phase thread has actually exited,
+the run reads **`stopping`** and the rack won't start another run, so a stopped
+test can never overlap the next one. If the phase is still stuck 10 s after
+the stop, the rack de-energizes the rig itself and records the run as stuck.
+Keep the `finally` **short and per-op fault-tolerant** (wrap each de-energize
+call in its own `try/except`). Two related facts: a guard trip (L1)
+de-energizes the rig *before* stopping the run, so it doesn't depend on your
+`finally`; and a hard kill (SIGKILL, power loss) bypasses Python entirely —
+which is why L0 hardware limits are non-negotiable.
 
 Notes:
 
-- **`arm_guard` is run-scoped and executor-disarmed.** It records the ids it
-  armed, and the **executor** disarms exactly those when the run ends —
-  in a `finally`, so it happens on pass, fail, abort, or timeout alike. A
+- **`arm_guard` is run-scoped and rack-disarmed.** It records the ids it
+  armed, and the **rack** disarms exactly those when the run ends — on pass,
+  fail, stop, or timeout alike. A
   guard never leaks into the next run and you never write disarm code.
   Persistent guards belong in `rig_config.yml`.
 - **Thresholds are signed** for bidirectional supplies. A regenerative supply
@@ -285,9 +287,9 @@ instrument's hardware-timed buffer, let it capture on its own clock, then read
 the trace back in one transfer and publish it by reference:
 
 ```python
-@htf.plug(SCOPE=SCOPE1)
-def capture_transient(test, SCOPE):
-    wave = SCOPE.fetch_waveform(channel=1)      # hardware did the DAQ
+@htf.plug(scope=plugs.SCOPE1)
+def capture_transient(test, scope):
+    wave = scope.fetch_waveform(channel=1)      # hardware did the DAQ
     capture_artifact("scope1.transient", wave, phase="capture_transient")
 ```
 
@@ -333,7 +335,7 @@ per metric** (§8). Scalars and metadata belong in measurements, not the artifac
 ### Declarative sweeps
 
 Use `grid` + `sweep` instead of hand-writing nested loops — you get a
-structured, dimensioned result and the loop can't drift from the plan.
+structured, dimensioned result, and every point streams as it happens.
 
 ```python
 def series(rows, key):
@@ -341,13 +343,13 @@ def series(rows, key):
     return [float(r["values"][key]) for r in rows]
 
 
-@htf.plug(PSU=PSU1, LOAD=LOAD1)
-@measures(htf.Measurement("vout_min").with_units(units.VOLT).in_range(4.9, 5.1))
-def characterize(test, PSU, LOAD):
+@htf.plug(psu=plugs.PSU1, load=plugs.LOAD1)
+@htf.measures(htf.Measurement("vout_min").with_units(units.VOLT).in_range(4.9, 5.1))
+def characterize(test, psu, load):
     rows = sweep(
         grid(vin=[20, 28, 36], iout=[0.5, 1.0]),   # row-major, first axis outer
-        apply=lambda p: (PSU.set_voltage(1, p["vin"]), LOAD.set_current(1, p["iout"])),
-        measure=lambda p: {"vout": PSU.measure_voltage(1)},
+        apply=lambda p: (psu.set_voltage(1, p["vin"]), load.set_current(1, p["iout"])),
+        measure=lambda p: {"vout": psu.measure_voltage(1)},
         settle_s=0.2,                               # wait between apply and measure
     )
     # rows = [{point, values, t_ms}, ...]. Persist ONE numeric series per metric —
@@ -383,11 +385,11 @@ that raises `KeyError: 'v'` (§7). Persist each metric as its own series.
 
 `sweep` doesn't just return rows — as each point completes it **publishes
 every numeric key of the `measure()` return dict, and every key of the point
-dict, as live telemetry channels** (under a per-phase path). Non-numeric
+dict, as live telemetry channels** (`test.<phase>.<name>`). Non-numeric
 values are skipped (bools become 0/1). Telemetry is persisted continuously
-with no retention cap, so **an abort at hour N leaves every point up to that
+with no retention cap, so **a stop at hour N leaves every point up to that
 instant in the record** — which makes telemetry, not a `capture_artifact` at
-the end of the phase, the right persistence for a long or abortable sweep
+the end of the phase, the right persistence for a long or stoppable sweep
 (the artifact only exists if the phase reaches the `capture_artifact` call).
 Three consequences: keep helper/bookkeeping state **out** of point dicts
 (every key becomes a channel); **name commanded and measured values
@@ -401,14 +403,14 @@ phases that complete.
 
 **OpenHTF applies a default phase timeout of 180 s.** A phase that runs
 longer — any real sweep or replay — is terminated with outcome `TIMEOUT`,
-and a timed-out phase **skips all remaining phases exactly like an abort**
+and a timed-out phase **skips all remaining phases exactly like a stop**
 (§6), so the in-phase `try/finally` is the cleanup path here too. Size an
 explicit timeout above the worst-case wall clock:
 
 ```python
 @htf.PhaseOptions(timeout_s=N_POINTS * PER_POINT_BUDGET_S + 900)
-@htf.plug(SAS=SAS1)
-def orbit_replay(test, SAS):
+@htf.plug(sas=plugs.SAS1)
+def orbit_replay(test, sas):
     ...
 ```
 
@@ -429,12 +431,12 @@ the script, so L1 protection stays live while the script is retrying.
 ### Resuming a failed run
 
 A finished run can be re-run from a phase onward — the "resume from here" button
-on a failed phase, or `resume_from_phase` on the run command. The rack slices
-`TEST_PHASES` from the named phase; because device plugs are server-owned and
-keep their state across runs, earlier phases needn't repeat. It is a new
-execution with its own id; the plan still describes the whole test, so skipped
-phases read as skipped. **Design phases so a later one can start from the state a
-former one left** (or make each phase re-establish what it needs).
+on a failed phase, `guppi run <name> --resume-from <phase>`, or
+`resume_from_phase` on the run command. The rack runs the test from the named
+**top-level** phase on; because device plugs are server-owned and keep their
+state across runs, earlier phases needn't repeat. It is a new execution with its
+own id. **Design phases so a later one can start from the state a former one
+left** (or make each phase re-establish what it needs).
 
 ---
 
@@ -565,8 +567,8 @@ output off (`set_output(ch, False)`), don't scale to zero.
   MPPT DC-DC charger, `FAST_LOWC`/`FAST_HIGHC` are the usual choices; `DEFAULT` is
   the widest-tolerance fallback.
 - **Settling:** command ack is ≤1 ms but the output settles in ~100 ms. Before a
-  dependent readback, call `PSU.wait_operation_complete()` (`*OPC?`) or
-  `time.sleep(0.1)`. The telemetry sampler polls continuously and doesn't need it.
+  dependent readback, call `psu.wait_operation_complete()` (`*OPC?`) or
+  `sleep(0.1)`. The telemetry sampler polls continuously and doesn't need it.
 - **Realised vs requested curve:** the module fits an exponential model, so the
   *realised* Vmp/Imp can differ from what you asked (Isc/Voc are exact). Read back
   what the DUT actually sees with `get_actual_sas_curve(ch)`.
@@ -638,9 +640,9 @@ power-board qualification.
 and verify the DUT keeps harvesting near the max-power point at each level."""
 
 import openhtf as htf
-from openhtf import measures
 from openhtf.util import units
-from devices.psu.keysight_mp4300 import SasCurve   # __builtins__ import allowed
+from devices.psu.keysight_mp4300 import SasCurve
+from guppi import arm_guard, capture_artifact, grid, plugs, safe_shutdown, sweep
 
 CH = 1
 # One panel's STC (full-sun) curve. Within the MP4361A envelope
@@ -658,32 +660,32 @@ def series(rows, key):
     return [float(r["values"][key]) for r in rows]
 
 
-@htf.plug(SAS=SAS1)
-def setup_array(test, SAS):
+@htf.plug(sas=plugs.SAS1)
+def setup_array(test, sas):
     # Order matters: mode → compensation → curve → protection → enable.
-    SAS.set_mode(CH, "SAS")
-    SAS.set_sas_bandwidth(CH, "FAST_LOWC")     # match the DUT's MPPT input stage
-    SAS.set_sas_curve(CH, STC)                 # raises if rejected — trust it
-    SAS.set_current_scale(CH, 100.0)           # start at full sun
-    SAS.set_ocp(CH, 9.5)                        # L0 above Isc, below module max
-    SAS.set_power_limit(CH, 350.0)             # keep the frame under FPL
+    sas.set_mode(CH, "SAS")
+    sas.set_sas_bandwidth(CH, "FAST_LOWC")     # match the DUT's MPPT input stage
+    sas.set_sas_curve(CH, STC)                 # raises if rejected — trust it
+    sas.set_current_scale(CH, 100.0)           # start at full sun
+    sas.set_ocp(CH, 9.5)                        # L0 above Isc, below module max
+    sas.set_power_limit(CH, 350.0)             # keep the frame under FPL
     arm_guard("sas1.frame_faulted", ">=", 1)   # L1 backstop on frame health
-    SAS.set_output(CH, True)
-    SAS.wait_operation_complete()
+    sas.set_output(CH, True)
+    sas.wait_operation_complete()
 
 
-@htf.plug(SAS=SAS1)
-@measures(
+@htf.plug(sas=plugs.SAS1)
+@htf.measures(
     # Reduce the matrix to scalar pass/fail; the full matrix goes to an artifact.
     htf.Measurement("harvest_at_full_sun_w").with_units(units.WATT).in_range(240, 300),
     htf.Measurement("min_harvest_ratio").in_range(0.85, 1.0),
 )
-def irradiance_sweep(test, SAS):
+def irradiance_sweep(test, sas):
     def measure(p):
         # Read V and I once each and derive P — measure_power() is V×I under
         # the hood, so asking for all three costs 4 queries, V and I twice.
-        v = SAS.measure_voltage(CH)
-        i = SAS.measure_current(CH)
+        v = sas.measure_voltage(CH)
+        i = sas.measure_current(CH)
         return {
             "v": v, "i": i, "p": v * i,
             # Available max power at this irradiance = scaled Pmp of the curve.
@@ -693,14 +695,14 @@ def irradiance_sweep(test, SAS):
     try:
         rows = sweep(
             grid(irradiance_pct=[20, 40, 60, 80, 100]),
-            apply=lambda p: SAS.set_current_scale(CH, p["irradiance_pct"]),
+            apply=lambda p: sas.set_current_scale(CH, p["irradiance_pct"]),
             measure=measure,
             settle_s=0.3,   # SAS output settle + DUT MPPT re-track
         )
     finally:
-        # L2 *inside the energizing phase*: a manual abort raises into the
-        # running phase and SKIPS every later phase — including the teardown
-        # below — so this finally is the abort off-path.
+        # L2 *inside the energizing phase*: a stop raises into the running
+        # phase and SKIPS every later phase — including the teardown below —
+        # so this finally is the stop path.
         safe_shutdown()
     # One uniform series per metric (§7); the irradiance axis rides (t0, sample_rate).
     for metric, unit in (("p", "W"), ("v", "V"), ("i", "A"), ("p_avail", "W")):
@@ -717,13 +719,13 @@ def irradiance_sweep(test, SAS):
     )
 
 
-@htf.plug(SAS=SAS1)
-def teardown(test, SAS):
-    # Normal-completion off-path ONLY: an abort (or phase timeout) skips this
-    # phase entirely — the sweep's finally above is the abort off-path (§6).
+@htf.plug(sas=plugs.SAS1)
+def teardown(test, sas):
+    # Normal-completion path ONLY: a stop (or phase timeout) skips this
+    # phase entirely — the sweep's finally above is the stop path (§6).
     safe_shutdown()
 
-TEST_PHASES = [setup_array, irradiance_sweep, teardown]
+test = htf.Test(setup_array, irradiance_sweep, teardown)
 ```
 
 Why it's built this way:
@@ -733,7 +735,7 @@ Why it's built this way:
   lowest step (20 %) stays above this curve's scale floor
   (`100 × 0.01 / ((9.1 − 8.6)/(38.0 − 32.4)) ≈ 11 %` — §9.1); sweeping lower
   would need per-point curve reprogramming or output-off below the floor.
-- **`safe_shutdown()` in the sweep phase's `finally`** — the abort off-path;
+- **`safe_shutdown()` in the sweep phase's `finally`** — the stop path;
   the trailing teardown phase only runs on normal completion (§6).
 - **`FAST_LOWC` compensation** chosen for an MPPT DC-DC input — prevents SAS-loop
   oscillation. Change to match your actual converter.
@@ -754,14 +756,14 @@ correct Voc and Vmp at each point, reprogram the curve per point instead of
 scaling. Precompute the four points from your panel model / datasheet:
 
 ```python
-@htf.plug(SAS=SAS1)
-@measures(htf.Measurement("min_harvest_ratio").in_range(0.85, 1.0))
-def irradiance_temp_grid(test, SAS):
+@htf.plug(sas=plugs.SAS1)
+@htf.measures(htf.Measurement("min_harvest_ratio").in_range(0.85, 1.0))
+def irradiance_temp_grid(test, sas):
     rows = sweep(
         grid(irradiance_wm2=[400, 700, 1000], cell_temp_c=[15, 45, 70]),
-        apply=lambda p: SAS.set_sas_curve(CH, panel_curve(p["irradiance_wm2"],
+        apply=lambda p: sas.set_sas_curve(CH, panel_curve(p["irradiance_wm2"],
                                                            p["cell_temp_c"])),
-        measure=lambda p: {"p": SAS.measure_power(CH),
+        measure=lambda p: {"p": sas.measure_power(CH),
                            "p_avail": panel_curve(p["irradiance_wm2"],
                                                   p["cell_temp_c"]).pmp()},
         settle_s=0.4,
@@ -798,13 +800,13 @@ absorbing it:
 # (2 writes/step) this can run a 300 s sweep in ~10 min on real hardware.
 for k in range(steps):
     apply_curve(k)
-    time.sleep(STEP_S)
+    sleep(STEP_S)
 
 # RIGHT — latency is absorbed; total ≈ DURATION_S.
 t0 = time.monotonic()
 for k in range(steps):
     apply_curve(k)
-    time.sleep(max(0.0, t0 + (k + 1) * STEP_S - time.monotonic()))
+    sleep(max(0.0, t0 + (k + 1) * STEP_S - time.monotonic()))
 ```
 
 If a step's writes exceed `STEP_S` the sleep goes non-positive and the loop
@@ -847,16 +849,15 @@ itself in the results.
 
 ## 11. What "up to Guppi standards" means
 
-A finished test has `TEST_PHASES` as a module-level list of phase functions,
-every device bound with `@htf.plug(NAME=DEVICE_ID)` using ids that match
-`rig_config.yml`, and every pass/fail limit in an `@measures(...)` decorator
-rather than prose. Measurements stay scalar; each waveform or sweep metric
+A finished test is one module-level `htf.Test`, every device bound with
+`@htf.plug(name=plugs.DEVICE_ID)` using ids that match `rig_config.yml`, and
+every pass/fail limit in an `@htf.measures(...)` decorator rather than prose. Measurements stay scalar; each waveform or sweep metric
 goes through `capture_artifact` as its own uniform series
 (`{"v", "sample_rate", …}`), never a `{"rows": …}` matrix.
 
 Safety is layered, in order: an energizing phase sets L0 hardware limits
 first, arms an L1 `arm_guard`, and de-energizes in an L2 `try/finally`
-inside the phase itself — an abort or phase timeout skips later phases, so
+inside the phase itself — a stop or phase timeout skips later phases, so
 a separate teardown phase is the normal-completion path only (§6). Sources always have voltage **and** current limits
 programmed, power-up order is explicit in every phase (source → DUT → sink,
 reversed on teardown), and actuations are proven by measurement — does
@@ -864,7 +865,8 @@ current actually flow? — not by DUT status flags (§10).
 
 Structurally: fast signals come from a hardware buffer, never a polling
 loop; test matrices use `grid`/`sweep`, not hand-rolled nested loops;
-prompts appear only where a human is genuinely required; and phases are
+waits use `guppi.sleep` so a stop is never held; prompts appear only where a
+human is genuinely required; and phases are
 resume-safe — a later phase either works from the state a former one left or
 re-establishes what it needs.
 
