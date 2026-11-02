@@ -13,20 +13,13 @@ This is the practitioner's companion to
 
 ## 0. Mental model — what actually runs
 
-A Guppi test is **a plain OpenHTF file in the rig's workspace under `tests/`**.
-There is no test registry and no framework subclass to inherit. The rack:
-
-1. Reads the file from *its own disk* (the workspace) — the script is never
-   shipped over the wire with the run command; `test_path` names a file and the
-   rack reads it.
-2. Runs the module and takes the one module-level `htf.Test` it defines.
-3. Publishes the run document with every phase, measurement, unit and limit —
-   read from the real OpenHTF phases, before anything is energized.
-4. Calls `test.execute(...)`. Every rig device is available as an OpenHTF
-   **plug** (`guppi.plugs.PSU1`) — a live, already connected driver instance
-   shared across all phases.
-5. Streams the run live to the dashboard (phases, measurements, prompts,
-   artifacts) as it runs, and persists the final record to your database.
+The loop itself — write, run, watch, verdict, log, timeline — is one page:
+[How a test runs](how-a-test-runs.md). In short: a Guppi test is **a plain
+OpenHTF file in the rig's workspace under `tests/`**; the rack reads it from
+its own disk, takes the one module-level `htf.Test`, publishes every phase and
+limit before anything is energized, runs it with each rig device bound as a
+live **plug**, records telemetry and the log for the run's window, and keeps
+the final record. This guide is about writing the file well.
 
 Key consequences you must design around:
 
@@ -114,6 +107,20 @@ Three rules, and that's the whole contract:
    that can raise. A missing data file read at module level fails the run at
    start; deferred into a setup phase it fails there with a clean, named
    failure.
+
+### Migrating an older script
+
+Scripts written for the first rack release used injected names. The rack
+injects nothing now, and such a file fails to load with `NameError: name
+'PSU1' is not defined`. Three edits:
+
+| Then | Now |
+|---|---|
+| `@htf.plug(psu=PSU1)` | `from guppi import plugs` … `@htf.plug(psu=plugs.PSU1)` |
+| `time.sleep(…)`, `safe_shutdown()`, `arm_guard(…)`, `prompt(…)` as bare names | `import time` and `from guppi import safe_shutdown, arm_guard, prompt` |
+| `TEST_PHASES = [a, b, c]` at the end | `test = htf.Test(a, b, c)` |
+
+Drop the `# noqa: F821` comments while you are there; the file now lints clean.
 
 ### What a plug actually is
 
@@ -386,11 +393,15 @@ that raises `KeyError: 'v'` (§7). Persist each metric as its own series.
 `sweep` doesn't just return rows — as each point completes it **publishes
 every numeric key of the `measure()` return dict, and every key of the point
 dict, as live telemetry channels** (`test.<phase>.<name>`). Non-numeric
-values are skipped (bools become 0/1). Telemetry is persisted continuously
-with no retention cap, so **a stop at hour N leaves every point up to that
-instant in the record** — which makes telemetry, not a `capture_artifact` at
-the end of the phase, the right persistence for a long or stoppable sweep
-(the artifact only exists if the phase reaches the `capture_artifact` call).
+values are skipped (bools become 0/1). History is saved while a recording is
+open, and **a run opens one for itself** (named `run <test> <id>`) if nobody is
+recording when it starts, closing it when the run ends — so **a stop at hour N
+leaves every point up to that instant in the record**, which makes telemetry,
+not a `capture_artifact` at the end of the phase, the right persistence for a
+long or stoppable sweep (the artifact only exists if the phase reaches the
+`capture_artifact` call). The point channels are listed in the catalog as they
+first stream, so a data view can bind them and `guppi query` can name them, and
+they stay listed after the run (like `test.<phase>.<measurement>`).
 Three consequences: keep helper/bookkeeping state **out** of point dicts
 (every key becomes a channel); **name commanded and measured values
 differently** (`vout_set` vs `vout`) — point and values keys share one

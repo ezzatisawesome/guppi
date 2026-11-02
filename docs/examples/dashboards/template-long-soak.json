@@ -1,0 +1,95 @@
+{
+  "kind": "dashboard",
+  "id": "long-soak",
+  "title": "<DUT> \u2014 soak",
+  "root": {
+    "id": "root",
+    "type": "canvas",
+    "children": [
+      {
+        "id": "a-plot",
+        "type": "waveform",
+        "read": "<dut>.<signal a>",
+        "label": "<Signal A>",
+        "col": 0,
+        "row": 0,
+        "colSpan": 12,
+        "rowSpan": 3,
+        "window": 600,
+        "traces": {
+          "<dut>.<signal a>": {
+            "color": "#2563eb"
+          }
+        }
+      },
+      {
+        "id": "b-plot",
+        "type": "waveform",
+        "read": "<dut>.<signal b>",
+        "label": "<Signal B>",
+        "col": 0,
+        "row": 3,
+        "colSpan": 12,
+        "rowSpan": 3,
+        "window": 600,
+        "traces": {
+          "<dut>.<signal b>": {
+            "color": "#d97706"
+          }
+        }
+      },
+      {
+        "id": "t-plot",
+        "type": "waveform",
+        "read": "<dut>.<temperature>",
+        "label": "Temperature",
+        "col": 0,
+        "row": 6,
+        "colSpan": 12,
+        "rowSpan": 3,
+        "window": 600,
+        "traces": {
+          "<dut>.<temperature>": {
+            "color": "#16a34a"
+          }
+        }
+      },
+      {
+        "id": "a",
+        "type": "readout",
+        "read": "<dut>.<signal a>",
+        "label": "<Signal A>",
+        "size": "md",
+        "accent": "#2563eb",
+        "col": 0,
+        "row": 9,
+        "colSpan": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "b",
+        "type": "readout",
+        "read": "<dut>.<signal b>",
+        "label": "<Signal B>",
+        "size": "md",
+        "accent": "#d97706",
+        "col": 4,
+        "row": 9,
+        "colSpan": 4,
+        "rowSpan": 2
+      },
+      {
+        "id": "t",
+        "type": "readout",
+        "read": "<dut>.<temperature>",
+        "label": "Temperature",
+        "size": "md",
+        "accent": "#16a34a",
+        "col": 8,
+        "row": 9,
+        "colSpan": 4,
+        "rowSpan": 2
+      }
+    ]
+  }
+}

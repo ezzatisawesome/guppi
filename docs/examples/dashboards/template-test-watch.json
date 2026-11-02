@@ -1,0 +1,127 @@
+{
+  "kind": "dashboard",
+  "id": "test-watch",
+  "title": "<Test> \u2014 watch",
+  "root": {
+    "id": "root",
+    "type": "canvas",
+    "children": [
+      {
+        "id": "dut-plot",
+        "type": "waveform",
+        "read": "<dut>.<measured signal>",
+        "label": "<Measured signal>",
+        "col": 0,
+        "row": 0,
+        "colSpan": 8,
+        "rowSpan": 3,
+        "window": 600,
+        "traces": {
+          "<dut>.<measured signal>": {
+            "color": "#2563eb"
+          }
+        }
+      },
+      {
+        "id": "dut",
+        "type": "readout",
+        "read": "<dut>.<measured signal>",
+        "label": "<Measured signal>",
+        "size": "lg",
+        "accent": "#2563eb",
+        "col": 8,
+        "row": 0,
+        "colSpan": 4,
+        "rowSpan": 3
+      },
+      {
+        "id": "stim-plot",
+        "type": "waveform",
+        "read": "<source>.<stimulus signal>",
+        "label": "<Stimulus>",
+        "col": 0,
+        "row": 3,
+        "colSpan": 8,
+        "rowSpan": 3,
+        "window": 600,
+        "traces": {
+          "<source>.<stimulus signal>": {
+            "color": "#d97706"
+          }
+        }
+      },
+      {
+        "id": "stim",
+        "type": "readout",
+        "read": "<source>.<stimulus signal>",
+        "label": "<Stimulus>",
+        "size": "lg",
+        "accent": "#d97706",
+        "col": 8,
+        "row": 3,
+        "colSpan": 4,
+        "rowSpan": 3
+      },
+      {
+        "id": "limit-plot",
+        "type": "waveform",
+        "read": "<dut>.<guarded signal>",
+        "label": "<Guarded signal> vs limit",
+        "col": 0,
+        "row": 6,
+        "colSpan": 8,
+        "rowSpan": 3,
+        "window": 600,
+        "traces": {
+          "<dut>.<guarded signal>": {
+            "color": "#16a34a"
+          }
+        }
+      },
+      {
+        "id": "limit",
+        "type": "readout",
+        "read": "<dut>.<guarded signal>",
+        "label": "<Guarded signal>",
+        "size": "lg",
+        "accent": "#16a34a",
+        "col": 8,
+        "row": 6,
+        "colSpan": 4,
+        "rowSpan": 3,
+        "warnMax": 0,
+        "limitMax": 0
+      },
+      {
+        "id": "safety",
+        "type": "row",
+        "title": "Safety",
+        "col": 0,
+        "row": 9,
+        "colSpan": 12,
+        "rowSpan": 2,
+        "children": [
+          {
+            "id": "off",
+            "type": "button",
+            "label": "All outputs off",
+            "write": "<source>.set_all_outputs"
+          },
+          {
+            "id": "state",
+            "type": "indicator",
+            "reads": [
+              "<source>.<output signal>",
+              "<dut>.<fault signal>"
+            ],
+            "labels": [
+              "Output",
+              "Fault"
+            ],
+            "style": "chip"
+          }
+        ]
+      }
+    ]
+  }
+}

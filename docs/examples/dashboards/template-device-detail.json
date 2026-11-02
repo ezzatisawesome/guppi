@@ -1,0 +1,98 @@
+{
+  "kind": "dashboard",
+  "id": "device-detail",
+  "title": "<Device> \u2014 detail",
+  "root": {
+    "id": "root",
+    "type": "canvas",
+    "children": [
+      {
+        "id": "plot",
+        "type": "waveform",
+        "read": "<device>.<signal a>",
+        "label": "<Signal A> and <Signal B>",
+        "col": 0,
+        "row": 0,
+        "colSpan": 12,
+        "rowSpan": 4,
+        "window": 60,
+        "traces": {
+          "<device>.<signal a>": {
+            "color": "#2563eb"
+          },
+          "<device>.<signal b>": {
+            "color": "#d97706"
+          }
+        },
+        "reads": [
+          "<device>.<signal b>"
+        ]
+      },
+      {
+        "id": "a",
+        "type": "readout",
+        "read": "<device>.<signal a>",
+        "label": "<Signal A>",
+        "size": "lg",
+        "accent": "#2563eb",
+        "col": 0,
+        "row": 4,
+        "colSpan": 3,
+        "rowSpan": 3
+      },
+      {
+        "id": "b",
+        "type": "readout",
+        "read": "<device>.<signal b>",
+        "label": "<Signal B>",
+        "size": "lg",
+        "accent": "#d97706",
+        "col": 3,
+        "row": 4,
+        "colSpan": 3,
+        "rowSpan": 3
+      },
+      {
+        "id": "c",
+        "type": "readout",
+        "read": "<device>.<signal c>",
+        "label": "<Signal C>",
+        "size": "md",
+        "accent": "#16a34a",
+        "col": 6,
+        "row": 4,
+        "colSpan": 3,
+        "rowSpan": 3
+      },
+      {
+        "id": "d",
+        "type": "readout",
+        "read": "<device>.<signal d>",
+        "label": "<Signal D>",
+        "size": "md",
+        "accent": "#64748b",
+        "col": 9,
+        "row": 4,
+        "colSpan": 3,
+        "rowSpan": 3
+      },
+      {
+        "id": "state",
+        "type": "indicator",
+        "reads": [
+          "<device>.<state 1>",
+          "<device>.<state 2>"
+        ],
+        "labels": [
+          "<State 1>",
+          "<State 2>"
+        ],
+        "style": "chip",
+        "col": 0,
+        "row": 7,
+        "colSpan": 12,
+        "rowSpan": 1
+      }
+    ]
+  }
+}

@@ -140,17 +140,18 @@ machine, and for stretches nobody had the page open.
 ### Runs
 
 The **Runs** panel lists every test run and recording, newest first. Search
-it, filter by result, and group it by name, serial, rig or tag. Click a run to
-open it in this view: every lane moves to the run's window, and the link
-(`?run=`) opens the same run for anyone you send it to. Click the run again to
-leave it; each lane goes back where it was.
+it; filter by result from the **result** column's header and group by name,
+serial, rig or tag from the **run** column's header. Click a run to show it in
+the Test panel (verdict, phases, log). Double-click it to move every lane to the
+run's window; the link (`?run=`) opens the same run for anyone you send it to.
 
 - **Tags** — label any run (`DUT-7`, `thermal-campaign`); a run can have
   several. Grouping by tag lists a run under each of its tags.
 - **Rename a recording, or change its times** — from its row (pencil, clock).
   A rename shows everywhere, for everyone. Recordings made before this release
   are renamed per view until they're brought into the hub's records.
-- **Change a test run's times** — open its log and use *edit times*. The times
+- **Change a test run's times** — open it in the Test panel and use *edit times*
+  beside *started*. The times
   the rig recorded are kept; *reset to recorded* puts them back. No data is
   deleted either way: a run is a window over the history.
 - **Delete** removes the run, its log and its captures, and it stays deleted —
@@ -203,6 +204,20 @@ Know exactly what that means so you never mistake a summary for the data:
   anything that matters, pull the real samples: `guppi runs <id> --bundle` exports a
   run's measurements and full waveforms to CSV, and the whole history is
   plain SQL away — see [Direct data access](data-access.md).
+
+## Design rules
+
+A dashboard that passes the shape check can still be a bad dashboard. The
+rules that make one tight live in one place, the `guppi-pages` skill's
+**Design rules** section, and `guppi push --check` / `guppi put --check`
+enforce them with a pointer to the offending block (`--no-lint` skips them).
+In one line each: no box around a single graph; no empty containers; the grid
+fills with no empty rows; a readout sits beside its graph in the same colour;
+one colour per signal everywhere it appears; at least one graph per page; at
+most eight colours; at most two readout sizes. The finished example to copy
+from is `docs/public/examples/dashboards/reference.json`, and four templates
+by intent (bench overview, device detail, test watch, long soak) sit beside
+it. `guppi skills install` puts the skill where Claude Code reads it.
 
 ## Building with a coding agent
 

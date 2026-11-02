@@ -112,7 +112,9 @@ guppi runs [EXECUTION] [--bundle [DIR]] [--limit N] [--rig R]
   `guppi query psu1.1.voltage psu1.1.current --since 12h --format csv > soak.csv`.
 - `runs` — test runs, newest first; with an id, one run in full, including
   its measurements and time window; `--bundle [DIR]` writes that run's
-  `run.json`, `measurements.csv` and captured waveforms (`scope/`) to a folder.
+  `run.json`, `measurements.csv`, `run.log` (the run's log as text: time,
+  level, source `test`/`rack`/`instrument`, device, logger, message) and
+  captured waveforms (`scope/`) to a folder.
 
 For `--bundle`, `EXECUTION` may be a prefix; omit it to take the latest run.
 `DIR` defaults to `run-<date>-<id>/`.
@@ -187,7 +189,14 @@ sees it), or `--org` to pick one; your personal org only when that's unclear.
 uploading anything: the JSON shape and every signal
 binding against the rig's catalog, reporting each problem with a JSON pointer
 (`/root/children/2/read: unknown signal 'psu1.1.voltagee'`). It exits 1 if
-any file has errors. The JSON Schemas for both formats are in `contracts/`
+any file has errors.
+
+Dashboards are also checked against Guppi's **design rules** (no box around a
+single graph, one colour per signal, no empty rows; the full list is in the
+`guppi-pages` skill). `push --check` and `put --check` treat a design-rule
+finding as an error and exit 1. A plain `push` or `put` does not refuse a page
+for it: the page is written and each finding is printed as a warning. Only a
+broken shape stops a write. `--no-lint` leaves the design rules out of either. The JSON Schemas for both formats are in `contracts/`
 (`dashboard.schema.json`, `data-view.schema.json`) and served by the hub at
 `/schemas/dashboard` and `/schemas/data-view`.
 
@@ -218,7 +227,13 @@ Scripts and coding agents:
   with `guppi login --headless`. Give scripts and agents an API key
   (`guppi keys create`) as `GUPPI_TOKEN` — note that keys are refused on
   `guppi migrate`, which needs a signed-in account.
-- `guppi run` exits `0` pass, `1` fail, `2` error, `3` aborted.
+- `guppi run` exits `0` pass, `1` fail, `2` error, `3` aborted, and its last
+  lines are the verdict and a link that opens the run in the app
+  (`<app>/?rig=<rig>&run=<execution_id>`). The app URL is `GUPPI_APP_URL`,
+  else cli.json `app`, else what the hub reports as `platform_url` on
+  `/health` (its `PLATFORM_URL` setting; remembered in cli.json `app` so later
+  commands don't ask again), else the hub itself (a bench hub serves its own
+  app).
 
 To set up Claude Code: `guppi skills install` copies five skills into
 `~/.claude/skills` — `guppi-pages` (build and edit dashboards and data views as

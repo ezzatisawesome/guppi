@@ -213,8 +213,10 @@ cd libuldaq-1.2.1 && ./configure && make -j"$(nproc)" && sudo make install && su
 - **Data viewer** — history over any time window; telemetry is kept
   indefinitely (prune channels you don't need from the Storage tab to reclaim
   space), and test executions and captured artifacts are kept.
-- **Tests** — run sequenced test scripts against the bench; results and
-  waveform captures attach to each execution.
+- **Tests** — run OpenHTF test scripts against the bench from the Test panel
+  or `guppi run`. A run records itself; its verdict, measurements, log and
+  captures are one click away. [How a test runs](how-a-test-runs.md) is the
+  whole loop on one page.
 - **Your data is yours** — the Postgres on the box is a normal Postgres; see
   [data-access.md](data-access.md).
 
@@ -244,8 +246,8 @@ within seconds. See [Dashboards and data views as files](cli.md#dashboards-and-d
 
 ```
 guppi rigs                # list paired rigs — a good first check
-guppi run smoke-test      # runs tests/smoke-test.py; prompts answered inline
-guppi runs --bundle       # write the latest run bundle (run.json + CSVs + scope/)
+guppi run smoke-test      # runs tests/smoke-test.py; prompts answered inline; ends with a link to the run
+guppi runs --bundle       # write the latest run bundle (run.json, measurements.csv, run.log, scope/)
 ```
 
 It's the same program everywhere — one `guppi`, whether the installer built it

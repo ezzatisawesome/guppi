@@ -1,0 +1,151 @@
+{
+  "kind": "dashboard",
+  "id": "bench-reference",
+  "title": "Bench \u2014 reference layout",
+  "root": {
+    "id": "root",
+    "type": "canvas",
+    "children": [
+      {
+        "id": "v-plot",
+        "type": "waveform",
+        "read": "psu1.1.voltage",
+        "label": "Rail voltage",
+        "col": 0,
+        "row": 0,
+        "colSpan": 8,
+        "rowSpan": 3,
+        "window": 60,
+        "traces": {
+          "psu1.1.voltage": {
+            "color": "#2563eb"
+          }
+        }
+      },
+      {
+        "id": "v",
+        "type": "readout",
+        "read": "psu1.1.voltage",
+        "label": "Rail voltage",
+        "size": "lg",
+        "accent": "#2563eb",
+        "col": 8,
+        "row": 0,
+        "colSpan": 4,
+        "rowSpan": 3,
+        "warnMax": 12.6,
+        "limitMax": 13.0
+      },
+      {
+        "id": "i-plot",
+        "type": "waveform",
+        "read": "psu1.1.current",
+        "label": "Rail current",
+        "col": 0,
+        "row": 3,
+        "colSpan": 8,
+        "rowSpan": 3,
+        "window": 60,
+        "traces": {
+          "psu1.1.current": {
+            "color": "#d97706"
+          }
+        }
+      },
+      {
+        "id": "i",
+        "type": "readout",
+        "read": "psu1.1.current",
+        "label": "Rail current",
+        "size": "lg",
+        "accent": "#d97706",
+        "col": 8,
+        "row": 3,
+        "colSpan": 4,
+        "rowSpan": 3,
+        "warnMax": 4.5,
+        "limitMax": 5.0
+      },
+      {
+        "id": "t-plot",
+        "type": "waveform",
+        "read": "tc1.temperature",
+        "label": "Board temperature",
+        "col": 0,
+        "row": 6,
+        "colSpan": 8,
+        "rowSpan": 3,
+        "window": 60,
+        "traces": {
+          "tc1.temperature": {
+            "color": "#16a34a"
+          }
+        }
+      },
+      {
+        "id": "t",
+        "type": "readout",
+        "read": "tc1.temperature",
+        "label": "Board temperature",
+        "size": "lg",
+        "accent": "#16a34a",
+        "col": 8,
+        "row": 6,
+        "colSpan": 4,
+        "rowSpan": 3,
+        "warnMax": 70,
+        "limitMax": 85
+      },
+      {
+        "id": "controls",
+        "type": "row",
+        "title": "Supply",
+        "col": 0,
+        "row": 9,
+        "colSpan": 12,
+        "rowSpan": 2,
+        "children": [
+          {
+            "id": "sv",
+            "type": "setpoint",
+            "read": "psu1.1.voltage",
+            "write": "psu1.1.set_voltage",
+            "label": "Set voltage",
+            "variant": "stepper",
+            "accent": "#2563eb"
+          },
+          {
+            "id": "si",
+            "type": "setpoint",
+            "read": "psu1.1.current",
+            "write": "psu1.1.set_current",
+            "label": "Current limit",
+            "variant": "stepper",
+            "accent": "#d97706"
+          },
+          {
+            "id": "on",
+            "type": "toggle",
+            "read": "psu1.1.output",
+            "write": "psu1.1.set_output",
+            "label": "Output",
+            "accent": "#2563eb"
+          },
+          {
+            "id": "ok",
+            "type": "indicator",
+            "reads": [
+              "psu1.1.output",
+              "bms1.fault"
+            ],
+            "labels": [
+              "Output",
+              "BMS fault"
+            ],
+            "style": "chip"
+          }
+        ]
+      }
+    ]
+  }
+}

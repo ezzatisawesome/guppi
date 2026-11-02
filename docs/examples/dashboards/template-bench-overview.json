@@ -1,0 +1,95 @@
+{
+  "kind": "dashboard",
+  "id": "bench-overview",
+  "title": "Bench overview",
+  "root": {
+    "id": "root",
+    "type": "canvas",
+    "children": [
+      {
+        "id": "main-plot",
+        "type": "waveform",
+        "read": "<device>.<main signal>",
+        "label": "<Main signal>",
+        "col": 0,
+        "row": 0,
+        "colSpan": 8,
+        "rowSpan": 3,
+        "window": 60,
+        "traces": {
+          "<device>.<main signal>": {
+            "color": "#2563eb"
+          }
+        }
+      },
+      {
+        "id": "main",
+        "type": "readout",
+        "read": "<device>.<main signal>",
+        "label": "<Main signal>",
+        "size": "lg",
+        "accent": "#2563eb",
+        "col": 8,
+        "row": 0,
+        "colSpan": 4,
+        "rowSpan": 3
+      },
+      {
+        "id": "second-plot",
+        "type": "waveform",
+        "read": "<device>.<second signal>",
+        "label": "<Second signal>",
+        "col": 0,
+        "row": 3,
+        "colSpan": 8,
+        "rowSpan": 3,
+        "window": 60,
+        "traces": {
+          "<device>.<second signal>": {
+            "color": "#d97706"
+          }
+        }
+      },
+      {
+        "id": "second",
+        "type": "readout",
+        "read": "<device>.<second signal>",
+        "label": "<Second signal>",
+        "size": "lg",
+        "accent": "#d97706",
+        "col": 8,
+        "row": 3,
+        "colSpan": 4,
+        "rowSpan": 3
+      },
+      {
+        "id": "controls",
+        "type": "row",
+        "title": "<Instrument>",
+        "col": 0,
+        "row": 6,
+        "colSpan": 12,
+        "rowSpan": 2,
+        "children": [
+          {
+            "id": "set",
+            "type": "setpoint",
+            "read": "<device>.<main signal>",
+            "write": "<device>.<set capability>",
+            "label": "<Setpoint>",
+            "variant": "stepper",
+            "accent": "#2563eb"
+          },
+          {
+            "id": "on",
+            "type": "toggle",
+            "read": "<device>.<output signal>",
+            "write": "<device>.<set output>",
+            "label": "Output",
+            "accent": "#2563eb"
+          }
+        ]
+      }
+    ]
+  }
+}

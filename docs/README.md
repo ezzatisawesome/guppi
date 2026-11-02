@@ -9,7 +9,9 @@ install the hub (`curl … | sudo bash`), connect your instruments with
 upgrading (`guppi update`) and pinning a version.
 
 ## 2. Use & interact with it
-- [**Getting started — Use it**](getting-started.md#4-use-it) — the live
+- [**How a test runs**](how-a-test-runs.md) — the whole loop on one screen:
+  write → run → watch → verdict → log → timeline. Start here.
+- [**Getting started — Use it**](getting-started.md#5-use-it) — the live
   dashboard, the data viewer, and running tests.
 - [**Run tests from your terminal**](getting-started.md#5-run-tests-from-your-terminal-optional)
   — the `guppi` CLI: `guppi rigs`, `guppi run <test>`, `guppi runs`,
