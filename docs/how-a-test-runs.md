@@ -38,21 +38,26 @@ there directly on the bench. The full authoring guide is
 
 ## Run
 
-From the app, open the **Test** panel, pick the test, type a DUT serial if you
-have one, press **Run**. From a terminal:
+Tests start from the CLI (the app watches and stops them, it does not start
+them):
 
 ```
 guppi run check_rail --dut SN-0042
 ```
 
-Either way the rack reads the file from its own disk, builds the test and runs
+The rack reads the file from its own disk, builds the test and runs
 it. The run starts recording by itself: the instruments' telemetry, the test's
 measurements and the log all land in history for the run's window, with no
 Record button involved. (If a recording was already open, the run joins it.)
+That recording is part of the run: the Runs list shows the run once.
 
 ## Watch
 
-The Test panel shows the phase rail from the first second, measurements
+The app header shows a pill for the rig's run on every page while it runs
+(name, phase, elapsed), then its verdict until you click it; clicking opens the
+run in the data view's **Runs panel** (the rig's bench view, if no data view is
+open). The panel shows
+the phase rail from the first second, measurements
 filling in against their limits, and a card for every `prompt()` the test asks.
 Answer it there, in the terminal, or let an agent answer; first answer wins.
 **Abort** stops the run: the phase's `finally` runs, and if it cannot exit the
@@ -76,8 +81,10 @@ run in the app:
 
 There is one log. Every line carries a **source**: `test` (your own
 `test.logger` lines and OpenHTF's), `rack` (the sequencer, safety, telemetry)
-or `instrument` (driver traffic, the SCPI writes and queries). The Test panel
-shows it under the run's phases, filtered to test + rack; two toggles add instrument traffic and debug.
+or `instrument` (driver traffic, the SCPI writes and queries). The Runs panel
+shows it under the run's phases, filtered to test, rack and signals; its
+**Filter** menu (with a line count per source) adds instrument traffic and
+debug lines, and says how many lines are hidden.
 Instrument traffic is DEBUG and is only produced when a device's entry in
 `rig_config.yml` sets `log_scpi: true`; leave it off unless you are debugging
 a driver, since a polled scope writes several lines per tick.
@@ -92,10 +99,11 @@ guppi query psu1.1.voltage system.log --since <started_at> --until <completed_at
 ## Timeline
 
 A run is a window over the history. There is one place a run is shown: the
-**Test panel**. It follows the rig's live run; in the Runs panel, click any run
-to show it there instead (verdict, facts, phases, log), and **‹ Tests** goes
-back. Double-click a run to park every lane of the data view on its window
-(*Data view* in the Test panel does the same). The link above does both for
+**Runs panel**, on the data view. Its home is the list of every run, with
+click a run to open it in place (verdict, facts, phases,
+log) and **‹ Runs** goes back. A live run shows by itself. Double-click a run
+to park every lane of the data view on its window (*Show in the data view* in
+the run's ⋯ menu does the same). The link above does both for
 anyone. From there, the data view is the
 place to see what every instrument did, with the log as a track under the
 traces. [Dashboards & data views](dashboards.md) covers the rest.

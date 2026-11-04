@@ -235,6 +235,11 @@ On a sustained breach the watchdog, in order:
 2. **aborts** the running test (best-effort),
 3. emits `system.safety_tripped` and **latches** until cleared.
 
+A latched watchdog checks nothing, so the rig refuses every run until someone
+clears the trip: **Clear safety trip** on the tripped run in the web app, or
+`guppi safety clear`. The tripped run records what tripped. Restarting the rack
+also clears it.
+
 It backstops *slow, sustained* faults (thermal, sustained over-limit); its
 response is bounded by the sample cadence. **Fast faults belong to the
 instrument's own OCP/current-limit (L0)**, not this loop.

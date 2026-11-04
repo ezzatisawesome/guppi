@@ -213,8 +213,8 @@ cd libuldaq-1.2.1 && ./configure && make -j"$(nproc)" && sudo make install && su
 - **Data viewer** — history over any time window; telemetry is kept
   indefinitely (prune channels you don't need from the Storage tab to reclaim
   space), and test executions and captured artifacts are kept.
-- **Tests** — run OpenHTF test scripts against the bench from the Test panel
-  or `guppi run`. A run records itself; its verdict, measurements, log and
+- **Tests** — run OpenHTF test scripts against the bench with `guppi run`, and
+  watch them in the data view's Runs panel. A run records itself; its verdict, measurements, log and
   captures are one click away. [How a test runs](how-a-test-runs.md) is the
   whole loop on one page.
 - **Your data is yours** — the Postgres on the box is a normal Postgres; see

@@ -127,11 +127,14 @@ list. Lanes have their own time window or link to a shared one so they pan
 and zoom together; a live window rides "now" until you pan, and snaps back
 when you resume.
 
-On top of the curves, the view paints what happened: test **runs** (pass/fail
-bands — click one to focus its time range), recording **sessions**, rig
-**offline** spans, instrument **connect/disconnect** events, **captures**
-(scope shots as point-in-time markers), and notes from `rig.annotate()`. Add
-your own **markers** with Alt+click; Alt+drag spans a region.
+On top of the curves, a panel can paint what happened: test **runs** (pass/fail
+bands — click one to focus its time range), **phases**, **recordings**, rig
+**offline** spans and instrument **connect/disconnect** events (**connection**),
+**captures** (scope shots as point-in-time markers), and **notes** from
+`rig.annotate()`. Drag one from the **rig** group of the channel list onto a
+panel; it joins the panel's legend, and its × takes it off again. A panel draws
+only the events it holds. Add your own **markers** with Alt+click; Alt+drag
+spans a region.
 
 Rig offline spans are recorded by the hub as they happen, from the rig's last
 heartbeat to its first one back, so they're there after a reload, on another
@@ -139,20 +142,22 @@ machine, and for stretches nobody had the page open.
 
 ### Runs
 
-The **Runs** panel lists every test run and recording, newest first. Search
-it; filter by result from the **result** column's header and group by name,
-serial, rig or tag from the **run** column's header. Click a run to show it in
-the Test panel (verdict, phases, log). Double-click it to move every lane to the
+The **Runs** panel lists every test run and recording, newest first (tests
+are started with `guppi run`). A recording the agent opened to keep a test
+run's telemetry is part of that run, not a row of its own. Filter by result
+from the **result** column's header and group by name, serial, rig or tag from
+the **run** column's header. Click a run to open it in the panel (verdict,
+phases, log); **‹ Runs** goes back. Double-click it to move every lane to the
 run's window; the link (`?run=`) opens the same run for anyone you send it to.
 
 - **Tags** — label any run (`DUT-7`, `thermal-campaign`); a run can have
   several. Grouping by tag lists a run under each of its tags.
-- **Rename a recording, or change its times** — from its row (pencil, clock).
+- **Rename a recording, or change its times** — from its row's ⋯ menu.
   A rename shows everywhere, for everyone. Recordings made before this release
   are renamed per view until they're brought into the hub's records.
-- **Change a test run's times** — open it in the Test panel and use *edit times*
-  beside *started*. The times
-  the rig recorded are kept; *reset to recorded* puts them back. No data is
+- **Change a test run's times** — *Edit times* in its ⋯ menu (in the list or
+  the open run). The times the rig recorded are kept; *Reset times to recorded*
+  puts them back. No data is
   deleted either way: a run is a window over the history.
 - **Delete** removes the run, its log and its captures, and it stays deleted —
   a re-run `guppi migrate` or a replayed rig event won't bring it back.

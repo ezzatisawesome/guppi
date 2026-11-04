@@ -37,8 +37,8 @@ Key consequences you must design around:
 - **The process is long-lived.** Each run loads the file afresh, but inside
   the *same* rack interpreter. Anything that escapes the module persists across
   runs: a background thread you start survives a stop (and still holds its port
-  next run), and imported helper modules stay cached in `sys.modules`, so edits
-  to a sibling helper need a rack restart to take effect. Stop background work —
+  next run). (Helpers imported from the test's own folder are re-imported each
+  run; other imported packages stay cached.) Stop background work —
   servers, threads, sockets — in the phase's `finally` (§6). A test *may* open a
   listening port (the "outbound-only" claim in §1 is about the Guppi service,
   not your OS), but it must close it in `finally` for the same reason.
@@ -56,7 +56,7 @@ Key consequences you must design around:
 | Where hardware is declared | `rig_config.yml` (installed at `~/.guppi/rig_config.yml`) |
 
 To run what you write: save it as `tests/<name>.py` in the rig workspace, then
-run it from the dashboard's test panel or with `guppi run <name>` (a path to a
+run it with `guppi run <name>` (a path to a
 `.py` file also works) — see the [CLI reference](cli.md). Results come back via
 `guppi runs <id> --bundle` or the dashboard.
 
@@ -155,9 +155,10 @@ Two more facts about loading: **`__file__` is set** to the script's
 path, so `Path(__file__).parent` finds data files shipped next to the test;
 and **the script's own directory is put on `sys.path`**, so a sibling helper
 module (`from orbit_parser import ...` next to your test) imports directly.
-Mind the flip side of that convenience: sibling imports are cached in
-`sys.modules` for the life of the rack process (§0), so after editing a
-helper you must restart `guppi rack` — re-running the test is not enough.
+Sibling modules are dropped from `sys.modules` when the run ends, so an
+edited helper is picked up on the next run. A relative path (`open("out.json")`,
+`OutputToJSON("./x.json")`) resolves against the rack's working directory, not
+the script's: build it from `Path(__file__).parent`.
 
 ---
 
@@ -197,7 +198,7 @@ Rules that keep results clean:
 ## 5. Prompts — collaborative pause points
 
 `prompt()` blocks the phase until answered from the CLI (`guppi run` asks
-inline) or the web UI (a card on the test panel). Every prompt —
+inline) or the web UI (a card in the Runs panel). Every prompt —
 question, answer, responder, timestamps — is recorded in `prompts[]` of the
 run-state doc.
 
@@ -263,8 +264,10 @@ test can never overlap the next one. If the phase is still stuck 10 s after
 the stop, the rack de-energizes the rig itself and records the run as stuck.
 Keep the `finally` **short and per-op fault-tolerant** (wrap each de-energize
 call in its own `try/except`). Two related facts: a guard trip (L1)
-de-energizes the rig *before* stopping the run, so it doesn't depend on your
-`finally`; and a hard kill (SIGKILL, power loss) bypasses Python entirely —
+de-energizes the rig as it stops the run, and again once the run has ended
+(after your teardown), so it doesn't depend on your `finally` and nothing
+switched on in between stays on (the rig then refuses runs until the trip is
+cleared: `guppi safety clear`); and a hard kill (SIGKILL, power loss) bypasses Python entirely —
 which is why L0 hardware limits are non-negotiable.
 
 Notes:
