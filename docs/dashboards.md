@@ -216,7 +216,7 @@ A dashboard that passes the shape check can still be a bad dashboard. The
 rules that make one tight live in one place, the `guppi-pages` skill's
 **Design rules** section, and `guppi push --check` / `guppi put --check`
 enforce them with a pointer to the offending block (`--no-lint` skips them).
-In one line each: no box around a single graph; no empty containers; the grid
+In one line each: every graph in a panel whose title names it; no empty containers; the grid
 fills with no empty rows; a readout sits beside its graph in the same colour;
 one colour per signal everywhere it appears; at least one graph per page; at
 most eight colours; at most two readout sizes. The finished example to copy

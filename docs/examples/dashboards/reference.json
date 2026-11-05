@@ -7,20 +7,26 @@
     "type": "canvas",
     "children": [
       {
-        "id": "v-plot",
-        "type": "waveform",
-        "read": "psu1.1.voltage",
-        "label": "Rail voltage",
+        "id": "v-plot-panel",
+        "type": "panel",
+        "title": "Rail voltage",
         "col": 0,
         "row": 0,
         "colSpan": 8,
         "rowSpan": 3,
-        "window": 60,
-        "traces": {
-          "psu1.1.voltage": {
-            "color": "#2563eb"
+        "children": [
+          {
+            "id": "v-plot",
+            "type": "waveform",
+            "read": "psu1.1.voltage",
+            "window": 60,
+            "traces": {
+              "psu1.1.voltage": {
+                "color": "#2563eb"
+              }
+            }
           }
-        }
+        ]
       },
       {
         "id": "v",
@@ -37,20 +43,26 @@
         "limitMax": 13.0
       },
       {
-        "id": "i-plot",
-        "type": "waveform",
-        "read": "psu1.1.current",
-        "label": "Rail current",
+        "id": "i-plot-panel",
+        "type": "panel",
+        "title": "Rail current",
         "col": 0,
         "row": 3,
         "colSpan": 8,
         "rowSpan": 3,
-        "window": 60,
-        "traces": {
-          "psu1.1.current": {
-            "color": "#d97706"
+        "children": [
+          {
+            "id": "i-plot",
+            "type": "waveform",
+            "read": "psu1.1.current",
+            "window": 60,
+            "traces": {
+              "psu1.1.current": {
+                "color": "#d97706"
+              }
+            }
           }
-        }
+        ]
       },
       {
         "id": "i",
@@ -67,20 +79,26 @@
         "limitMax": 5.0
       },
       {
-        "id": "t-plot",
-        "type": "waveform",
-        "read": "tc1.temperature",
-        "label": "Board temperature",
+        "id": "t-plot-panel",
+        "type": "panel",
+        "title": "Board temperature",
         "col": 0,
         "row": 6,
         "colSpan": 8,
         "rowSpan": 3,
-        "window": 60,
-        "traces": {
-          "tc1.temperature": {
-            "color": "#16a34a"
+        "children": [
+          {
+            "id": "t-plot",
+            "type": "waveform",
+            "read": "tc1.temperature",
+            "window": 60,
+            "traces": {
+              "tc1.temperature": {
+                "color": "#16a34a"
+              }
+            }
           }
-        }
+        ]
       },
       {
         "id": "t",

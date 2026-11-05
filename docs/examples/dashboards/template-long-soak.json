@@ -7,52 +7,70 @@
     "type": "canvas",
     "children": [
       {
-        "id": "a-plot",
-        "type": "waveform",
-        "read": "<dut>.<signal a>",
-        "label": "<Signal A>",
+        "id": "a-plot-panel",
+        "type": "panel",
+        "title": "<Signal A>",
         "col": 0,
         "row": 0,
         "colSpan": 12,
         "rowSpan": 3,
-        "window": 600,
-        "traces": {
-          "<dut>.<signal a>": {
-            "color": "#2563eb"
+        "children": [
+          {
+            "id": "a-plot",
+            "type": "waveform",
+            "read": "<dut>.<signal a>",
+            "window": 600,
+            "traces": {
+              "<dut>.<signal a>": {
+                "color": "#2563eb"
+              }
+            }
           }
-        }
+        ]
       },
       {
-        "id": "b-plot",
-        "type": "waveform",
-        "read": "<dut>.<signal b>",
-        "label": "<Signal B>",
+        "id": "b-plot-panel",
+        "type": "panel",
+        "title": "<Signal B>",
         "col": 0,
         "row": 3,
         "colSpan": 12,
         "rowSpan": 3,
-        "window": 600,
-        "traces": {
-          "<dut>.<signal b>": {
-            "color": "#d97706"
+        "children": [
+          {
+            "id": "b-plot",
+            "type": "waveform",
+            "read": "<dut>.<signal b>",
+            "window": 600,
+            "traces": {
+              "<dut>.<signal b>": {
+                "color": "#d97706"
+              }
+            }
           }
-        }
+        ]
       },
       {
-        "id": "t-plot",
-        "type": "waveform",
-        "read": "<dut>.<temperature>",
-        "label": "Temperature",
+        "id": "t-plot-panel",
+        "type": "panel",
+        "title": "Temperature",
         "col": 0,
         "row": 6,
         "colSpan": 12,
         "rowSpan": 3,
-        "window": 600,
-        "traces": {
-          "<dut>.<temperature>": {
-            "color": "#16a34a"
+        "children": [
+          {
+            "id": "t-plot",
+            "type": "waveform",
+            "read": "<dut>.<temperature>",
+            "window": 600,
+            "traces": {
+              "<dut>.<temperature>": {
+                "color": "#16a34a"
+              }
+            }
           }
-        }
+        ]
       },
       {
         "id": "a",

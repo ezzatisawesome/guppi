@@ -191,8 +191,8 @@ binding against the rig's catalog, reporting each problem with a JSON pointer
 (`/root/children/2/read: unknown signal 'psu1.1.voltagee'`). It exits 1 if
 any file has errors.
 
-Dashboards are also checked against Guppi's **design rules** (no box around a
-single graph, one colour per signal, no empty rows; the full list is in the
+Dashboards are also checked against Guppi's **design rules** (every graph in a
+titled panel, one colour per signal, no empty rows; the full list is in the
 `guppi-pages` skill). `push --check` and `put --check` treat a design-rule
 finding as an error and exit 1. A plain `push` or `put` does not refuse a page
 for it: the page is written and each finding is printed as a warning. Only a

@@ -7,25 +7,31 @@
     "type": "canvas",
     "children": [
       {
-        "id": "plot",
-        "type": "waveform",
-        "read": "<device>.<signal a>",
-        "label": "<Signal A> and <Signal B>",
+        "id": "plot-panel",
+        "type": "panel",
+        "title": "<Signal A> and <Signal B>",
         "col": 0,
         "row": 0,
         "colSpan": 12,
         "rowSpan": 4,
-        "window": 60,
-        "traces": {
-          "<device>.<signal a>": {
-            "color": "#2563eb"
-          },
-          "<device>.<signal b>": {
-            "color": "#d97706"
+        "children": [
+          {
+            "id": "plot",
+            "type": "waveform",
+            "read": "<device>.<signal a>",
+            "window": 60,
+            "traces": {
+              "<device>.<signal a>": {
+                "color": "#2563eb"
+              },
+              "<device>.<signal b>": {
+                "color": "#d97706"
+              }
+            },
+            "reads": [
+              "<device>.<signal b>"
+            ]
           }
-        },
-        "reads": [
-          "<device>.<signal b>"
         ]
       },
       {

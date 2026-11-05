@@ -7,20 +7,26 @@
     "type": "canvas",
     "children": [
       {
-        "id": "main-plot",
-        "type": "waveform",
-        "read": "<device>.<main signal>",
-        "label": "<Main signal>",
+        "id": "main-plot-panel",
+        "type": "panel",
+        "title": "<Main signal>",
         "col": 0,
         "row": 0,
         "colSpan": 8,
         "rowSpan": 3,
-        "window": 60,
-        "traces": {
-          "<device>.<main signal>": {
-            "color": "#2563eb"
+        "children": [
+          {
+            "id": "main-plot",
+            "type": "waveform",
+            "read": "<device>.<main signal>",
+            "window": 60,
+            "traces": {
+              "<device>.<main signal>": {
+                "color": "#2563eb"
+              }
+            }
           }
-        }
+        ]
       },
       {
         "id": "main",
@@ -35,20 +41,26 @@
         "rowSpan": 3
       },
       {
-        "id": "second-plot",
-        "type": "waveform",
-        "read": "<device>.<second signal>",
-        "label": "<Second signal>",
+        "id": "second-plot-panel",
+        "type": "panel",
+        "title": "<Second signal>",
         "col": 0,
         "row": 3,
         "colSpan": 8,
         "rowSpan": 3,
-        "window": 60,
-        "traces": {
-          "<device>.<second signal>": {
-            "color": "#d97706"
+        "children": [
+          {
+            "id": "second-plot",
+            "type": "waveform",
+            "read": "<device>.<second signal>",
+            "window": 60,
+            "traces": {
+              "<device>.<second signal>": {
+                "color": "#d97706"
+              }
+            }
           }
-        }
+        ]
       },
       {
         "id": "second",
