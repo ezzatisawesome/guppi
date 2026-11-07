@@ -163,6 +163,17 @@ one *is* configurable with `RACK_HOST` / `RACK_PORT`. "port 8080 is already in
 use" almost always means a rack is already running: stop it
 (`pkill -f src/main.py`) rather than moving the port.
 
+On Windows the private Postgres is on **55432**, and the installer checks all of
+these ports before it changes anything, naming the program that holds one. To
+look yourself, in PowerShell:
+
+```
+Get-NetTCPConnection -State Listen -LocalPort 8000 | % { Get-Process -Id $_.OwningProcess }
+```
+
+Port 8080 is often taken by another program on a Windows PC. If you can't stop
+it, move the rack: `setx RACK_PORT 8081`, then open a new terminal.
+
 ## Starting over
 
 ```
@@ -173,3 +184,13 @@ GUPPI_PURGE_DATA=1 guppi uninstall
 then re-run the installer. This deletes all recorded data. (Equivalent, if
 `guppi` itself is broken: `curl -fsSL …/install.sh | sudo GUPPI_PURGE_DATA=1
 bash -s -- --uninstall`.)
+
+On Windows, `$env:GUPPI_PURGE_DATA = '1'; guppi uninstall`. If `guppi` itself is
+broken, run the installer as a script block, the one way to pass it options:
+
+```
+& ([scriptblock]::Create((irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1))) -Uninstall -Purge
+```
+
+It deletes only what Guppi put in `%LOCALAPPDATA%\Guppi`, so another program's
+files in a folder of the same name stay.

@@ -10,6 +10,9 @@
 #       install left at /opt/guppi/src, or the release source tarball — then
 #       hands over to packages/rack/install.sh with args passed through.
 #
+#   curl ... | bash -s -- cli                (no sudo; Linux or macOS)
+#     → just the `guppi` CLI, for this user, via uv (a laptop driving a bench)
+#
 # Uninstall:  ... | sudo bash -s -- --uninstall          (hub; GUPPI_PURGE_DATA=1
 #             ... | sudo bash -s -- rack --uninstall      also drops the database)
 #
@@ -59,6 +62,77 @@ set -Eeuo pipefail
 fail() { echo ""; echo "✗ $*" >&2; exit 1; }
 trap 'echo ""; echo "✗ Install failed at line $LINENO (see the message above)." >&2;
       echo "  Re-running the installer is safe — it picks up where it left off." >&2' ERR
+
+# ── CLI only ────────────────────────────────────────────────────────────────
+# `curl ... | bash -s -- cli` puts just the `guppi` command on a laptop or any
+# machine that drives a bench from elsewhere: Linux or macOS, no root, nothing
+# else installed. uv owns the Python 3.12 the bytecode release needs, and
+# `uv tool install` gives guppi its own environment and a command on PATH.
+# Re-running it (or `guppi update` on such a machine) upgrades in place.
+if [ "${1:-}" = cli ]; then
+  [ "$(id -u)" -ne 0 ] || fail "Run the CLI install WITHOUT sudo — it installs for your user:
+  curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | bash -s -- cli"
+  [ ! -d /opt/guppi/src/packages/cli ] || fail "This machine has a Guppi bench, which already has guppi — update it with: guppi update"
+  REPO="ezzatisawesome/guppi"
+  GUPPI_REF="${GUPPI_REF:-}"
+  fetch() {
+    curl -fsSL --retry 3 --retry-delay 2 --connect-timeout 15 \
+      --speed-limit 1024 --speed-time 30 "$@"
+  }
+  TMPD=$(mktemp -d "${TMPDIR:-/tmp}/guppi-cli.XXXXXX")
+  trap 'rm -rf "$TMPD"' EXIT
+
+  UV=$(command -v uv || true)
+  [ -n "$UV" ] || { [ -x "$HOME/.local/bin/uv" ] && UV="$HOME/.local/bin/uv"; } || true
+  if [ -z "$UV" ]; then
+    echo "── Installing uv (it manages guppi's Python) ──"
+    fetch https://astral.sh/uv/install.sh -o "$TMPD/uv-install.sh" \
+      || fail "Couldn't download the uv installer from astral.sh"
+    UV_NO_MODIFY_PATH=1 sh "$TMPD/uv-install.sh" >/dev/null || fail "uv install failed"
+    UV="$HOME/.local/bin/uv"
+    [ -x "$UV" ] || fail "uv installed, but not at $UV"
+  fi
+
+  if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
+    cp "$GUPPI_SRC_TARBALL" "$TMPD/guppi-src.tar.gz"
+    GUPPI_REF="${GUPPI_REF:-local}"
+  else
+    if [ -z "$GUPPI_REF" ]; then
+      JSON=$(fetch "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null || true)
+      GUPPI_REF=$(grep -m1 '"tag_name"' <<<"$JSON" | cut -d'"' -f4 || true)
+      [ -n "$GUPPI_REF" ] || fail "No public release found on $REPO (GitHub API may be rate-limited) — set GUPPI_REF to a tag."
+    fi
+    echo "── Fetching guppi $GUPPI_REF ──"
+    DL="https://github.com/$REPO/releases/download/$GUPPI_REF"
+    fetch -o "$TMPD/guppi-src.tar.gz" "$DL/guppi-src.tar.gz" \
+      || fail "No guppi-src.tar.gz asset on release $GUPPI_REF"
+    if fetch -o "$TMPD/SHA256SUMS" "$DL/SHA256SUMS" 2>/dev/null; then
+      want=$(grep " guppi-src.tar.gz\$" "$TMPD/SHA256SUMS" | cut -d' ' -f1 || true)
+      got=$( (sha256sum "$TMPD/guppi-src.tar.gz" 2>/dev/null || shasum -a 256 "$TMPD/guppi-src.tar.gz") | cut -d' ' -f1)
+      [ -z "$want" ] || [ "$want" = "$got" ] || fail "guppi-src.tar.gz failed checksum verification against $GUPPI_REF's SHA256SUMS"
+    fi
+  fi
+  mkdir -p "$TMPD/src"
+  tar -xzf "$TMPD/guppi-src.tar.gz" -C "$TMPD/src" --strip-components=1
+
+  echo "── Installing the guppi CLI ──"
+  "$UV" tool install --force --python 3.12 "$TMPD/src/packages/cli" >/dev/null 2>"$TMPD/uv.log" \
+    || { cat "$TMPD/uv.log" >&2; fail "uv tool install failed (output above)"; }
+  BIN=$("$UV" tool dir --bin)
+  "$BIN/guppi" --help >/dev/null || fail "$BIN/guppi was installed but doesn't run"
+  echo "✓ guppi $GUPPI_REF installed: $BIN/guppi"
+  case ":$PATH:" in
+    *":$BIN:"*) ;;
+    *) if "$UV" tool update-shell >/dev/null 2>&1; then
+         echo "  $BIN is on your PATH in new terminals. For this one: export PATH=\"$BIN:\$PATH\""
+       else
+         echo "  $BIN isn't on your PATH. Add it to your shell profile: export PATH=\"$BIN:\$PATH\""
+       fi ;;
+  esac
+  echo "  Next: guppi use <bench hostname or IP>   (or: guppi use cloud && guppi login)"
+  echo "  Update later with: guppi update"
+  exit 0
+fi
 
 [ "$(id -u)" -eq 0 ] || fail "Run as root:  curl ... | sudo bash"
 # Resolve our own directory BEFORE `cd /` — when invoked as `bash scripts/install.sh`

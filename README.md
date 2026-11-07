@@ -1,139 +1,76 @@
 # Guppi
 
-Guppi turns a Raspberry Pi (or any Debian box) into a self-contained lab bench:
-live telemetry, instrument control, automated test sequencing, and a web
-dashboard. It runs entirely on your network — no cloud, no account, no login.
+Your lab bench in a browser. Guppi finds your instruments, streams live data to
+a dashboard, and runs [OpenHTF](https://github.com/google/openhtf) tests. It
+runs on your own network: no cloud, no account.
 
-It speaks to your hardware through 200+ built-in instrument drivers (power
-supplies, electronic loads, DMMs, oscilloscopes, SMUs, RF analyzers,
-temperature controllers, and more), auto-detected on the bus — and runs test
-scripts written against [OpenHTF](https://github.com/google/openhtf), with
-measurements streaming live to the dashboard as they're taken.
+200+ instruments work out of the box: power supplies, loads, DMMs, scopes, SMUs,
+analyzers, DAQs and more.
 
-## Quick start
+## Install
+
+On the machine wired to your instruments (a Raspberry Pi, any Debian/Ubuntu box,
+or Windows):
 
 ```
+# Linux
 curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
-guppi hub          # the server side — leave it running
 
-curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash -s -- rack
-guppi rack         # the instrument side — scans your bench and pairs
-
-# then open http://<pi>:8000 from any browser on your LAN
+# Windows (PowerShell)
+irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1 | iex
 ```
 
-Details below.
-
-## Install the hub
-
-The hub is the server side: database, message broker, dashboard, and test
-orchestration. On the Pi:
+Then start it and open the address it prints:
 
 ```
-curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
+guppi up
 ```
 
-One command, ~2–4 minutes. The installer sets up PostgreSQL (a system
-service), PostgREST, NATS, and the Guppi hub, then hands you one command:
+Runs on 64-bit Raspberry Pi OS, Debian 11+ or Ubuntu 20.04+ (2 GB RAM), and
+Windows 10 1803+. Anyone on your network can open the dashboard, so keep it on
+a network you trust. On Windows, [Getting started](docs/getting-started.md#on-windows)
+covers what differs: ports, the firewall prompt and uninstalling.
+
+## Just the CLI
+
+To drive a bench from your laptop:
 
 ```
-guppi hub    # runs all servers in the foreground — logs in your terminal, Ctrl-C stops them
+# macOS or Linux
+curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | bash -s -- cli
+
+# Windows (PowerShell)
+& ([scriptblock]::Create((irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1))) -Cli
 ```
 
-While it runs, the dashboard is at `http://<pi>:8000` for any browser on your
-LAN. The Guppi servers are not daemons — closing the terminal stops them, and
-after a reboot you run `guppi hub` again. To keep it running after you log out
-of an SSH session, start it inside a terminal multiplexer you install yourself
-(`sudo apt install tmux`, then `tmux new -s hub`) or under `nohup`.
-
-- **Pin a version** (installer and assets come from the same release):
-
-  ```
-  curl -fsSL https://github.com/ezzatisawesome/guppi/releases/download/<tag>/install.sh | sudo bash
-  ```
-
-  Each [release](https://github.com/ezzatisawesome/guppi/releases) carries its
-  own `install.sh`, pinned to that release. The one on `main` installs the
-  latest.
-- **Upgrade**: `guppi update` (or re-run the installer).
-
-## Connect your instruments
-
-The rack is the instrument side — it runs on the machine physically wired to
-the bench (the same Pi is the common case). Same installer, `rack` component:
-
 ```
-curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash -s -- rack
-guppi rack
+guppi use <bench>        # point it at your bench
+guppi run <test>         # run a test
+guppi runs --bundle      # export the latest run
+guppi skills install     # teach Claude Code to drive Guppi
 ```
 
-The installer asks which hub this rack should pair with (this machine, a hub
-elsewhere on your LAN, or Guppi Cloud). On startup `guppi rack` scans for
-USB/VISA and Ethernet instruments and prints what it found, then pairs with
-the hub. On the same box it claims automatically over loopback; on another LAN
-machine it prints a claim code you enter once in the dashboard.
-
-Devices, networked-instrument discovery, and safety abort limits are declared
-in `rig_config.yml` — see [Configuring your rig](docs/rig-config.md). Validate
-a config before booting with `guppi rack config check`.
-
-## Run tests
-
-Tests are plain OpenHTF files, dropped into the rig's workspace. Your
-configured instruments are plugs (`from guppi import plugs` → `plugs.PSU1`, …),
-and `guppi` helpers cover parameter sweeps, operator prompts, waveform capture,
-and watchdog safety limits. Run them from the dashboard, or from any machine with
-the `guppi` CLI:
-
-```
-guppi run <test> [--rig R]   # run a test; answer prompts inline
-guppi results [-o DIR]       # export the latest run: run.json + measurements.csv + scope/
-guppi abort                  # stop the running test
-guppi rigs                   # list paired rigs
-```
-
-See [Writing tests](docs/openhtf-authoring-guide.md) to get started.
+Upgrade anything with `guppi update`.
 
 ## Docs
 
-- [Getting started](docs/getting-started.md) — blank SD card to live telemetry.
-- [Configuring your rig](docs/rig-config.md) — the full `rig_config.yml` reference: devices, discovery, safety limits.
-- [Writing tests](docs/openhtf-authoring-guide.md) — the OpenHTF test contract: phases, measurements, sweeps, prompts.
-- [CLI reference](docs/cli.md) — every `guppi` command and option on one page.
-- [Instrument drivers](docs/drivers.md) — how drivers load, and how to write one for your instrument or board.
-- [Direct data access](docs/data-access.md) — psql, PostgREST, pandas, Grafana; your database is yours.
-- [Troubleshooting](docs/troubleshooting.md) — services, logs, the common failures.
-- [Architecture](docs/architecture.md) — how the single-box install works under the hood.
+- [Getting started](docs/getting-started.md)
+- [How a test runs](docs/how-a-test-runs.md)
+- [Writing tests](docs/openhtf-authoring-guide.md)
+- [Dashboards](docs/dashboards.md)
+- [Configuring your rig](docs/rig-config.md)
+- [Instrument drivers](docs/drivers.md)
+- [CLI reference](docs/cli.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [All docs](docs/README.md)
 
-## What this repo is
+## Help
 
-The public distribution for Guppi: the installer, docs, and versioned
-[releases](https://github.com/ezzatisawesome/guppi/releases) containing
-`guppi-src.tar.gz` (hub + rack source) and `guppi-ui-local.tar.gz` (the
-prebuilt dashboard). Development happens in a separate repository. See
-[CONTRIBUTING](CONTRIBUTING.md) for what helps: bug reports and instrument
-requests. Pull requests here can't be merged.
+- Something broke: [bug report](../../issues/new?template=bug-report.yml) (include the release version and the last screen of `guppi up`)
+- Want an instrument supported: [instrument request](../../issues/new?template=instrument-request.yml) (include its `*IDN?` reply)
+- Questions: [Discussions](../../discussions)
 
-## Support
-
-- **Something broke** → [open a bug report](../../issues/new?template=bug-report.yml)
-  with your release version (`cat /etc/guppi/version`) and the last screen of
-  `guppi hub` output.
-- **An instrument you want supported** → [instrument request](../../issues/new?template=instrument-request.yml)
-  with its `*IDN?` string.
-- **Questions and ideas** → [Discussions](../../discussions).
-
-## License
-
-Guppi is proprietary software. It is free to install and run on your own bench;
-release source is provided for transparency and security review. See
+This repo holds the installer, docs and [releases](https://github.com/ezzatisawesome/guppi/releases);
+development happens elsewhere, so pull requests can't be merged
+([CONTRIBUTING](CONTRIBUTING.md)). Guppi is free to run on your bench; see
 [LICENSE](LICENSE).
-
-## Requirements
-
-- Raspberry Pi 4/5 with the **64-bit** Raspberry Pi OS, or any arm64/amd64
-  Debian bookworm/bullseye or Ubuntu 20.04+ box, 2 GB+ RAM
-- PostgreSQL ≥ 15 (the installer adds the official pgdg repo automatically if
-  your distro ships an older version)
-- A trusted LAN: the dashboard is open to anyone who can reach the Pi
-  (read-only viewing by design; there are no accounts)

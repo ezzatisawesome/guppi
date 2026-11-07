@@ -48,7 +48,17 @@ It installs the same hub and rack for your user only, in
 `%LOCALAPPDATA%\Guppi`, with a private PostgreSQL on `127.0.0.1` (nothing
 system-wide, no services), and adds `guppi` to your PATH: open a new terminal
 afterwards. The rack's settings live in `%USERPROFILE%\.guppi`, as on Linux.
-Re-run it to upgrade; `-Uninstall` removes it (`-Purge` deletes the data too).
+Re-run it to upgrade. `guppi uninstall` removes it and keeps your data; set
+`$env:GUPPI_PURGE_DATA = '1'` first to delete the data too.
+
+It needs ports 8000, 4222, 9222, 3010 and 55432. If another program holds one,
+the installer names that program and stops before changing anything: stop it
+and re-run. Port 8080, the rack's, only gets a warning.
+
+Its last step starts the hub once, and Windows asks whether `python`,
+`nats-server` and `postgrest` may accept connections from your network.
+**Allow** (Windows asks for administrator approval) to open the dashboard from
+other computers; **Cancel** keeps Guppi to this PC, where it works either way.
 
 What differs from Linux:
 
@@ -251,15 +261,23 @@ from a terminal (`guppi run`, `guppi runs`, `guppi abort`, `guppi rigs`),
 talking to the hub over HTTP. **Hub and rack boxes already have it** — the
 installers build the full CLI, so on the bench you just run it.
 
-To drive the bench from any other machine (a laptop on the bench LAN), install
-the CLI from the release's source tarball and point it at the hub. The CLI
-needs Python 3.12; `uv` fetches it for you:
+To drive the bench from any other machine (a laptop on the bench LAN, or
+anywhere for Guppi Cloud), install just the CLI. One line, no admin rights:
 
 ```
-curl -fsSL -o /tmp/guppi-src.tar.gz \
-  https://github.com/ezzatisawesome/guppi/releases/latest/download/guppi-src.tar.gz
-tar -xzf /tmp/guppi-src.tar.gz -C /tmp
-uv tool install --python 3.12 /tmp/guppi/packages/cli   # or: pipx install --python python3.12 …
+# macOS or Linux (no sudo)
+curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | bash -s -- cli
+
+# Windows (PowerShell)
+& ([scriptblock]::Create((irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1))) -Cli
+```
+
+It installs [uv](https://docs.astral.sh/uv/) if you don't have it (uv
+brings the Python 3.12 the CLI needs), installs the latest release's `guppi`
+for your user, and checks it runs. Nothing else is installed. Re-run it, or
+run `guppi update`, to upgrade. Then:
+
+```
 guppi use condor               # the bench's hostname (or IP); checked, then saved for every command
 guppi skills install           # optional: teach Claude Code to build dashboards
 ```
@@ -274,8 +292,8 @@ guppi run smoke-test      # runs tests/smoke-test.py; prompts answered inline; e
 guppi runs --bundle       # write the latest run bundle (run.json, measurements.csv, run.log, scope/)
 ```
 
-It's the same program everywhere — one `guppi`, whether the installer built it
-or you pipx-installed it.
+It's the same program everywhere: one `guppi`, whether a bench installer
+built it or you installed just the CLI.
 
 ## Upgrading
 

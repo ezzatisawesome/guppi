@@ -1,7 +1,10 @@
 # CLI reference
 
 One `guppi` command everywhere. The bench installers build it for you; on any
-other machine, install it per [Getting started §5](getting-started.md#5-run-tests-from-your-terminal-optional).
+other machine, install just the CLI with one line
+(`curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | bash -s -- cli`,
+or `install.ps1 -Cli` on Windows); see [Getting started §6](getting-started.md#6-run-tests-from-your-terminal-optional).
+`guppi update` upgrades it.
 
 `guppi` on its own shows which hub it talks to, whether you're signed in, and
 your rigs, then the commands grouped as below (on a bench box with both the
@@ -89,7 +92,7 @@ deny in one step. `guppi control` with no argument shows the current setting.
 ## Data
 
 ```
-guppi catalog [filter] [--kind signal|capability] [--values] [--rig R]
+guppi catalog [filter] [--kind signal|capability] [--values] [--all] [--rig R]
 guppi query <path…> [--since 1h] [--until now | --run EXECUTION] [--buckets 2000|raw] [--format json|csv] [--rig R]
 guppi runs [--since 7d] [--status fail] [--dut SERIAL] [--limit N] [--rig R]
 guppi runs EXECUTION [--log [--src test,rack,instrument]] [--bundle [DIR]] [--rig R]
@@ -100,7 +103,9 @@ guppi recordings [--since 3d] [--limit N] [--rig R]
 - `catalog` — every signal and command the rig exposes, with its real path.
   Use these paths in dashboards, sequences and queries. `--values` adds each
   signal's current value, read live from the rig (narrow it with a filter:
-  `guppi catalog psu1 --values`).
+  `guppi catalog psu1 --values`). `--all` lists every setting and command of
+  each device, including the groups the catalog leaves out (a scope's decode,
+  math, wavegen, ...); filter it as `DEVICE` or `DEVICE.TEXT`.
 - A command that fails says so in the terminal, and also leaves a trace:
   `~/.guppi/logs/cli.log` (UTC, the telemetry clock) and — when it was about a
   rig the hub can reach — a line on that rig's `system.log`, so the failure
@@ -133,6 +138,24 @@ guppi recordings [--since 3d] [--limit N] [--rig R]
 
 `EXECUTION` may be a prefix everywhere; for `--bundle`, omit it to take the latest run.
 `DIR` defaults to `run-<date>-<id>/`.
+
+### Change an instrument while it runs
+
+```
+guppi set <path> <value> [--rig R]
+guppi send <path> [JSON params] [--rig R]
+```
+
+- `set` changes one setting by its path and prints the value the instrument
+  reports afterwards (instruments round: a scope snaps V/div to 1-2-5).
+  `guppi set scope1.1.scale 0.5`, `guppi set scope1.timebase_scale 1e-6`,
+  `guppi set psu1.1.current 0.2` (the limit), `guppi set awg1.1.frequency 1000`.
+  The value is converted to what the setting takes: a number, `on`/`off`, or
+  one of its options.
+- `send` runs a command: `guppi send scope1.single`,
+  `guppi send scope1.measure '{"measurement": "vpp", "channel": 1}'`.
+- Paths come from `guppi catalog <device> --all`. Both need the hub to be
+  allowed to actuate the bench (`guppi control allow`).
 
 ### Upload data files
 
@@ -250,9 +273,9 @@ Scripts and coding agents:
   commands don't ask again), else the hub itself (a bench hub serves its own
   app).
 
-To set up Claude Code: `guppi skills install` copies five skills into
+To set up Claude Code: `guppi skills install` copies six skills into
 `~/.claude/skills` — `guppi-pages` (build and edit dashboards and data views as
-files), `guppi-analysis` (query history and runs into pandas),
+files), `guppi-dashboard-design` (lay out a dashboard that reads well), `guppi-analysis` (query history and runs into pandas),
 `guppi-rig-setup` (declare a bench and troubleshoot it), `guppi-driver` (write a
 driver for an unsupported instrument) and `write-openhtf-test` (write, run and
 debug OpenHTF test scripts). They ship with the CLI, so re-run it after

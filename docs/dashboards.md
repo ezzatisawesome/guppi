@@ -213,13 +213,14 @@ Know exactly what that means so you never mistake a summary for the data:
 ## Design rules
 
 A dashboard that passes the shape check can still be a bad dashboard. The
-rules that make one tight live in one place, the `guppi-pages` skill's
-**Design rules** section, and `guppi push --check` / `guppi put --check`
+rules that make one tight live in one place, the `guppi-dashboard-design`
+skill (its **Enforced rules** section), and `guppi push --check` / `guppi put --check`
 enforce them with a pointer to the offending block (`--no-lint` skips them).
 In one line each: every graph in a panel whose title names it; no empty containers; the grid
 fills with no empty rows; a readout sits beside its graph in the same colour;
 one colour per signal everywhere it appears; at least one graph per page; at
-most eight colours; at most two readout sizes. The finished example to copy
+most eight colours; at most two readout sizes; no text that looks like a
+reading (a number with a unit, a state word, a coloured label). The finished example to copy
 from is `docs/public/examples/dashboards/reference.json`, and four templates
 by intent (bench overview, device detail, test watch, long soak) sit beside
 it. `guppi skills install` puts the skill where Claude Code reads it.

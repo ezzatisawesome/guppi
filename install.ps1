@@ -18,6 +18,20 @@ rack's settings live in %USERPROFILE%\.guppi, as on Linux.
 
 Re-running upgrades in place (stop the bench first); a failed upgrade rolls
 back. Options: -Ref <tag>, -SrcTarball <path> (offline), -Uninstall [-Purge].
+`iex` passes none, so to give one, run the script as a script block:
+
+    & ([scriptblock]::Create((irm <the URL above>))) -Uninstall
+
+The hub needs ports 8000, 4222, 9222, 3010 and 55432: if another program
+holds one, the installer names it and stops before changing anything. The
+rack needs 8080 (RACK_PORT moves it), which only gets a warning here.
+
+Just the guppi command (a laptop that drives a bench from elsewhere), no bench:
+
+    & ([scriptblock]::Create((irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1))) -Cli
+
+or set $env:GUPPI_CLI = '1' before the irm | iex line.
+
 Windows on ARM runs the x64 build under emulation: several of the hub's
 Python dependencies have no ARM64 wheels.
 #>
@@ -26,8 +40,13 @@ param(
     [string]$SrcTarball = $env:GUPPI_SRC_TARBALL,
     [string]$UiTarball = $env:GUPPI_UI_TARBALL,
     [switch]$Uninstall,
-    [switch]$Purge
+    [switch]$Purge,
+    [switch]$Cli
 )
+# `irm ... | iex` runs a script in the caller's own scope, so the install runs
+# in a child one: its preferences, its helpers and the database passwords it
+# reads end with it, instead of staying behind in the user's PowerShell.
+& {
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'  # the progress bar makes downloads 10x slower
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
@@ -41,8 +60,18 @@ $RackHome = Join-Path $env:USERPROFILE '.guppi'
 # install keeps the binaries it was created with; only a new one gets these.
 $PgVersion = '18.6.1'
 $PgPort = 55432  # off 5432, so a Postgres already on this machine is left alone
+# What listens where: the hub's must be free to finish (step 7 starts it once).
+$HubPorts = @{ 8000 = 'the hub'; 4222 = 'NATS'; 9222 = 'NATS for browsers'; 3010 = 'PostgREST'; $PgPort = 'PostgreSQL' }
+$RackPort = if ($env:RACK_PORT -match '^\d+$') { [int]$env:RACK_PORT } else { 8080 }
 # Pinned fallbacks for when the GitHub API rate-limits us (60/hour per IP).
 $NatsFallback, $PostgrestFallback, $UvFallback = 'v2.15.2', 'v16.5', '0.13.7'
+# Environment variables are the process's, not the scope's, and under `iex` the
+# process is the user's PowerShell: the ones set below are put back at the end.
+$SavedEnv = @{}
+foreach ($name in 'UV_PYTHON', 'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'PGPASSWORD', 'PGOPTIONS') {
+    $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
+}
+try {
 # One interpreter for every venv, x64 everywhere (see above).
 $env:UV_PYTHON = 'cpython-3.12-windows-x86_64-none'
 $env:UV_PYTHON_INSTALL_DIR = "$Root\python"
@@ -58,6 +87,7 @@ function Fail([string]$msg) {
 }
 function Step([string]$msg) { Write-Host "-- $msg --" -ForegroundColor Cyan }
 function Note([string]$msg) { Write-Host "   $msg" }
+function Warn([string]$msg) { Write-Host "!  $msg" -ForegroundColor Yellow }
 
 function Fetch([string]$url, [string]$out) {
     for ($i = 1; $i -le 3; $i++) {
@@ -96,6 +126,43 @@ function HubAnswers {
     catch { return [bool]$_.Exception.Response }  # an HTTP error still means something answered
 }
 
+# This install's own programs (the hub's servers, the rack, a guppi command),
+# known by where they run from: Windows won't replace or delete a file that one
+# has open. Anything else on the machine is not ours to stop.
+function OwnProcesses {
+    @(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith("$Root\", [StringComparison]::OrdinalIgnoreCase) })
+}
+
+function RefuseWhileRunning([string]$then) {
+    # `guppi update` and `guppi uninstall` start this as they exit, and a venv's
+    # python.exe is a launcher that outlives its child a moment: let them go.
+    for ($i = 0; ($running = OwnProcesses) -and $i -lt 5; $i++) { Start-Sleep -Milliseconds 400 }
+    # A database a killed hub left behind is the hub's alone: stop it, as guppi hub does.
+    if ($running -and -not @($running | Where-Object ProcessName -ne 'postgres')) {
+        Note 'stopping the database an earlier hub left running'
+        $null = Quietly "$PgDist\bin\pg_ctl.exe" @('-D', $PgData, '-m', 'fast', '-w', 'stop')
+        $running = OwnProcesses
+    }
+    if ($running) {
+        $names = @($running | ForEach-Object ProcessName | Sort-Object -Unique) -join ', '
+        Fail "Guppi is running ($names): stop it (Ctrl-C where guppi up or guppi hub runs), then $then."
+    }
+}
+
+# One line per port in $ports (port -> what of ours needs it) that some program
+# listens on, naming the program, so a clash says what to stop.
+function PortsInUse([hashtable]$ports) {
+    if (-not (Get-Command Get-NetTCPConnection -ErrorAction SilentlyContinue)) { return }
+    Get-NetTCPConnection -State Listen -LocalPort @($ports.Keys) -ErrorAction SilentlyContinue |
+        Sort-Object LocalPort, OwningProcess -Unique | ForEach-Object {
+            $p = Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue
+            $who = if ($p.Path) { "$($p.ProcessName) (pid $($p.Id), $($p.Path))" }
+                   elseif ($p) { "$($p.ProcessName) (pid $($p.Id))" }
+                   else { "pid $($_.OwningProcess)" }
+            "port $($_.LocalPort) ($($ports[[int]$_.LocalPort])) is in use by $who"
+        }
+}
+
 function Secret {
     $bytes = New-Object byte[] 24
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
@@ -105,6 +172,16 @@ function Secret {
 function Run([string]$exe, [string[]]$argv, [string]$what) {
     & $exe @argv
     if ($LASTEXITCODE -ne 0) { Fail "$what failed (exit $LASTEXITCODE)" }
+}
+
+# A native command's exit code, its output discarded. Windows PowerShell turns
+# each line on a redirected stderr into an error record, which 'Stop' throws:
+# here stderr is expected (pg_ctl stopping nothing, a guppi.exe that won't run)
+# and only the exit code counts.
+function Quietly([string]$exe, [string[]]$argv) {
+    $ErrorActionPreference = 'Continue'
+    try { & $exe @argv *> $null } catch { return 1 }  # it didn't even start
+    return $LASTEXITCODE
 }
 
 # UTF-8 without a byte-order mark (5.1's -Encoding utf8 writes one, which
@@ -122,18 +199,82 @@ function UserPath([string]$dir, [bool]$add) {
     if ($add -and ($env:Path -split ';') -notcontains $dir) { $env:Path = "$dir;$env:Path" }
 }
 
+# ── CLI only ─────────────────────────────────────────────────────────────────
+# Just `guppi`, for this user: uv brings Python 3.12 (the release is 3.12
+# bytecode) and `uv tool install` gives guppi its own environment and a command
+# on PATH. Nothing lands in the bench's folder. Re-running (or `guppi update` on
+# such a machine) upgrades in place.
+if ($Cli -or $env:GUPPI_CLI -eq '1') {
+    if (Test-Path "$Root\src\packages\cli") { Fail 'this machine has a Guppi bench, which already has guppi: update it with guppi update' }
+    # uv's own defaults, not the bench's private Python and cache.
+    Remove-Item Env:UV_PYTHON_INSTALL_DIR, Env:UV_CACHE_DIR -ErrorAction SilentlyContinue
+    $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("guppi-cli-" + [guid]::NewGuid())
+    New-Item -ItemType Directory $Tmp | Out-Null
+    try {
+        $uv = (Get-Command uv.exe -ErrorAction SilentlyContinue).Source
+        if (-not $uv) {
+            Step 'uv (it manages guppi''s Python)'
+            $uvTag = LatestTag 'astral-sh/uv' $UvFallback
+            $uvZip = 'uv-x86_64-pc-windows-msvc.zip'
+            Fetch "https://github.com/astral-sh/uv/releases/download/$uvTag/$uvZip" "$Tmp\uv.zip"
+            Fetch "https://github.com/astral-sh/uv/releases/download/$uvTag/$uvZip.sha256" "$Tmp\uv.sha256"
+            Verify "$Tmp\uv.zip" ((Get-Content "$Tmp\uv.sha256") -split '\s+')[0]
+            Expand-Archive -Force "$Tmp\uv.zip" "$Tmp\uv"
+            $uvHome = Join-Path $env:USERPROFILE '.local\bin'
+            New-Item -ItemType Directory -Force $uvHome | Out-Null
+            Copy-Item -Force "$Tmp\uv\uv.exe", "$Tmp\uv\uvx.exe" $uvHome -ErrorAction SilentlyContinue
+            $uv = "$uvHome\uv.exe"
+            if (-not (Test-Path $uv)) { Fail "uv didn't land at $uv" }
+            UserPath $uvHome $true
+        }
+        if ($SrcTarball) {
+            if (-not $Ref) { $Ref = 'local' }
+            Copy-Item $SrcTarball "$Tmp\guppi-src.tar.gz"
+        } else {
+            if (-not $Ref) { $Ref = LatestTag $Repo '' }
+            Step "guppi $Ref"
+            $dl = "https://github.com/$Repo/releases/download/$Ref"
+            try { Fetch "$dl/SHA256SUMS" "$Tmp\SHA256SUMS" } catch { Note 'no SHA256SUMS on this release: skipping verification' }
+            Fetch "$dl/guppi-src.tar.gz" "$Tmp\guppi-src.tar.gz"
+            $sum = SumFor "$Tmp\SHA256SUMS" 'guppi-src.tar.gz'
+            if ($sum) { Verify "$Tmp\guppi-src.tar.gz" $sum; Note 'guppi-src.tar.gz: checksum OK' }
+        }
+        New-Item -ItemType Directory "$Tmp\src" | Out-Null
+        Run tar.exe @('-xzf', "$Tmp\guppi-src.tar.gz", '-C', "$Tmp\src", '--strip-components=1') 'extracting the release'
+        Step 'the guppi CLI'
+        Run $uv @('tool', 'install', '--force', '--python', '3.12', "$Tmp\src\packages\cli") 'uv tool install'
+        $toolBin = (& $uv tool dir --bin).Trim()
+        Run "$toolBin\guppi.exe" @('--help') 'guppi --help' | Out-Null
+        UserPath $toolBin $true
+        Write-Host "OK  guppi $Ref installed: $toolBin\guppi.exe" -ForegroundColor Green
+        Note 'Open a new terminal, then: guppi use <bench hostname or IP>   (or: guppi use cloud; guppi login)'
+        Note 'Update later with: guppi update'
+    } finally {
+        Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
+    }
+    return
+}
+
 # ── Uninstall ────────────────────────────────────────────────────────────────
 if ($Uninstall) {
-    if (HubAnswers) { Fail 'the hub is running: stop it (Ctrl-C where guppi up or guppi hub runs) first.' }
+    RefuseWhileRunning 'uninstall again'
+    # What this installer made, by name: a folder called Guppi may hold someone else's files too.
+    $ours = @('src', 'src.prev', 'ui', 'ui.prev', 'bin', 'python', 'cache', 'pgsql')
+    if ($Purge) { $ours += 'etc', 'data' }
+    foreach ($d in $ours) { Remove-Item -Recurse -Force "$Root\$d" -ErrorAction SilentlyContinue }
+    $stuck = @($ours | Where-Object { Test-Path "$Root\$_" })
+    if ($stuck) {
+        Fail "couldn't delete $(($stuck | ForEach-Object { "$Root\$_" }) -join ', '): close whatever has files open there, then uninstall again."
+    }
     UserPath $Bin $false
-    if ($Purge) {
-        Remove-Item -Recurse -Force $Root -ErrorAction SilentlyContinue
+    if (-not $Purge) {
+        Write-Host "Uninstalled. Your data stays in $Data and $RackHome (-Purge deletes the data in $Root)."
+    } elseif ($others = @(Get-ChildItem -Force $Root -ErrorAction SilentlyContinue)) {
         Write-Host "Uninstalled, and deleted the database and settings in $Root."
+        Note "$Root itself stays: it also holds files Guppi didn't put there ($(($others | Select-Object -First 3 -ExpandProperty Name) -join ', '))."
     } else {
-        foreach ($d in 'src', 'src.prev', 'ui', 'bin', 'python', 'cache', 'pgsql') {
-            Remove-Item -Recurse -Force "$Root\$d" -ErrorAction SilentlyContinue
-        }
-        Write-Host "Uninstalled. Your data stays in $Data and $RackHome (-Purge removes $Root)."
+        Remove-Item -Force $Root -ErrorAction SilentlyContinue
+        Write-Host "Uninstalled, and deleted the database and settings in $Root."
     }
     return
 }
@@ -145,7 +286,16 @@ if (-not (Get-Command tar.exe -ErrorAction SilentlyContinue)) {
 if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
     Note 'Windows on ARM: installing the x64 build, which runs under emulation.'
 }
-if (HubAnswers) { Fail 'the hub is running: stop it (Ctrl-C where guppi up or guppi hub runs), then re-run.' }
+RefuseWhileRunning 're-run the installer'
+# Anything else answering on :8000 is not "the hub is running": say what it is.
+$busy = @(PortsInUse $HubPorts)
+if ($busy) {
+    $busy | ForEach-Object { Note $_ }
+    Fail 'another program has ports the hub needs (above): stop it, then re-run the installer.'
+}
+foreach ($line in @(PortsInUse @{ $RackPort = 'the rack' })) {
+    Warn "$line. guppi up needs it too: stop that program first, or set RACK_PORT to a free port."
+}
 
 New-Item -ItemType Directory -Force $Root, $Bin, $Etc, $Data, "$Data\artifacts", $RackHome | Out-Null
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("guppi-install-" + [guid]::NewGuid())
@@ -362,8 +512,7 @@ if not exist "%MAIN%" set "MAIN=src\main.pyc"
 # (Y/N)?" after every Ctrl-C. A venv's console script embeds its interpreter's
 # absolute path, so a copy runs from bin\ without the venv's python.exe on PATH.
 Copy-Item -Force "$Cli\.venv\Scripts\guppi.exe" "$Bin\guppi.exe"
-& "$Bin\guppi.exe" --help *> $null
-if ($LASTEXITCODE -ne 0) {
+if ((Quietly "$Bin\guppi.exe" @('--help')) -ne 0) {
     Note 'the copied guppi.exe does not run: using a shim instead'
     Remove-Item "$Bin\guppi.exe"
     WriteText "$Bin\guppi.cmd" "@echo off`r`n`"%~dp0..\src\packages\cli\.venv\Scripts\guppi.exe`" %*`r`n"
@@ -372,6 +521,9 @@ UserPath $Bin $true
 
 # ── 7. Check it starts ───────────────────────────────────────────────────────
 Step '7/7 Starting the hub once to check it answers'
+# The hub serves the dashboard to the LAN, so Windows asks the first time it listens.
+Note 'Windows may ask to let python, nats-server and postgrest through its firewall:'
+Note 'allow it to open the dashboard from other computers, or Cancel to keep it to this one.'
 $hub = Start-Process -PassThru -WindowStyle Hidden -FilePath "$Cli\.venv\Scripts\python.exe" `
     -ArgumentList @('-m', 'guppi_cli.hub', "`"$Etc\hub.env`"") `
     -RedirectStandardOutput "$Tmp\hub.out" -RedirectStandardError "$Tmp\hub.err"
@@ -383,7 +535,7 @@ for ($i = 0; $i -lt 60 -and -not $hub.HasExited; $i++) {
 # The supervisor's servers are in Job Objects that close with it: killing it stops them all.
 if (-not $hub.HasExited) { & taskkill.exe /PID $hub.Id /T /F | Out-Null }
 $hub.WaitForExit()
-& "$PgBin\pg_ctl.exe" -D $PgData -m fast -w stop 2>$null | Out-Null  # if a hard kill left it
+$null = Quietly "$PgBin\pg_ctl.exe" @('-D', $PgData, '-m', 'fast', '-w', 'stop')  # if a hard kill left it
 
 if (-not $ok) {
     Get-Content "$Tmp\hub.out", "$Tmp\hub.err" -Tail 25 -ErrorAction SilentlyContinue | Write-Host
@@ -410,3 +562,8 @@ Write-Host '    guppi up        start the bench (hub + rack); Ctrl-C stops it'
 Write-Host '    guppi hub       or just the hub;  guppi rack  just the rack'
 Write-Host '  Dashboard: http://localhost:8000 while it runs.'
 Write-Host "  Instruments are set up in $RackHome\rig_config.yml (or from the dashboard)."
+
+} finally {
+    foreach ($name in $SavedEnv.Keys) { [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process') }
+}
+}  # the child scope opened under param()

@@ -1,53 +1,25 @@
-# Guppi documentation
+# Guppi docs
 
-Everything you need to run a bench with Guppi, in the order you'll want it.
+## Start
 
-## 1. Install it
-[**Getting started**](getting-started.md) — blank SD card → live telemetry:
-install the hub (`curl … | sudo bash`), connect your instruments with
-`guppi rack`, and open the dashboard at `http://<host>.local:8000`. Also covers
-upgrading (`guppi update`) and pinning a version.
+- [Getting started](getting-started.md): install, connect instruments, open the dashboard
+- [How a test runs](how-a-test-runs.md): write, run, watch, read the verdict
 
-## 2. Use & interact with it
-- [**How a test runs**](how-a-test-runs.md) — the whole loop on one screen:
-  write → run → watch → verdict → log → timeline. Start here.
-- [**Getting started — Use it**](getting-started.md#5-use-it) — the live
-  dashboard, the data viewer, and running tests.
-- [**Run tests from your terminal**](getting-started.md#5-run-tests-from-your-terminal-optional)
-  — the `guppi` CLI: `guppi rigs`, `guppi run <test>`, `guppi runs`,
-  `guppi abort`.
-- [**CLI reference**](cli.md) — every `guppi` command and option on one page:
-  running tests, exporting results, rig config checks, servers, update/uninstall.
-- [**Dashboards & data views**](dashboards.md) — build live monitoring and
-  control boards (readouts, plots, toggles, P&ID diagrams) and timeline
-  analysis views; signal formulas; working with the agent.
-- [**Buttons & sequences**](sequences.md) — scripted dashboard buttons: the
-  `rig` API, composing buttons with `rig.run`, prompts, recording, abort.
-- [**Writing tests**](openhtf-authoring-guide.md) — authoring OpenHTF test
-  scripts to Guppi standards: the plain-OpenHTF contract, measurements and
-  limits, prompts, the three safety layers, declarative sweeps, and capturing
-  waveforms/sweep metrics by reference.
-- [**Uploading data files**](uploading-data.md) — bring CSV data from loggers,
-  scopes and spreadsheets into a rig's history with `guppi upload` (local or
-  cloud); formats, time zones and big files.
-- [**Direct data access**](data-access.md) — your data is a normal Postgres:
-  query it with `psql`, PostgREST (HTTP/JSON), pandas, or Grafana. No export
-  ceremony.
-- [**Configuring your rig**](rig-config.md) — the full `rig_config.yml`
-  reference: device layout, networked-instrument discovery, and L1 safety
-  abort-limits. Validate with `guppi rack config check`.
+## Use it
 
-## 3. Create a driver
-[**Instrument drivers**](drivers.md) — 200+ instruments already ship. When
-yours isn't covered, write one Python class: pick a family base (`Device`,
-`ScpiInstrument`, `ChannelInstrument`, `ScpiScope`, `SweptAnalyzer`), scaffold
-it with `make new-driver`, and drop it in via `rig_config.yml`.
+- [Writing tests](openhtf-authoring-guide.md): OpenHTF scripts, measurements, prompts, safety
+- [Dashboards and data views](dashboards.md): live boards and timeline views
+- [Buttons and sequences](sequences.md): scripted dashboard buttons
+- [Configuring your rig](rig-config.md): `rig_config.yml`, discovery, safety limits
+- [CLI reference](cli.md): every `guppi` command
+- [Uploading data](uploading-data.md): bring in CSVs from other tools
+- [Direct data access](data-access.md): query your data with psql, pandas or Grafana
 
-## When something's wrong
-[**Troubleshooting**](troubleshooting.md) — services, logs, and the common
-failures.
+## Extend it
 
-## Under the hood
-[**Architecture**](architecture.md) — how the single-box install fits together,
-and the guarantees you can rely on (offline forever, your data is yours,
-outbound-only rack).
+- [Instrument drivers](drivers.md): write one for an instrument Guppi doesn't support
+
+## Fix it
+
+- [Troubleshooting](troubleshooting.md)
+- [Architecture](architecture.md): how the pieces fit
