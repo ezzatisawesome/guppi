@@ -787,6 +787,13 @@ GUPPI_BACKEND="local"
 DATABASE_URL="postgresql://guppi@/guppi?host=/var/run/postgresql&port=$PG_PORT"
 GUPPI_DATA_DIR="$GUPPI_DATA"
 GUPPI_UI_DIR="$GUPPI_HOME/ui"
+# Where guppi-hub finds the servers it runs (guppi_cli/hub.py).
+GUPPI_NATS_SERVER="/usr/local/bin/nats-server"
+GUPPI_NATS_CONF="$GUPPI_HOME/src/packages/agent/infrastructure/nats/nats.dev.conf"
+GUPPI_POSTGREST="/usr/local/bin/postgrest"
+GUPPI_POSTGREST_CONF="$GUPPI_ETC/postgrest.conf"
+GUPPI_AGENT_DIR="$GUPPI_HOME/src/packages/agent"
+GUPPI_AGENT_PYTHON="$GUPPI_HOME/src/packages/agent/.venv/bin/python"
 EOF
 chown "$RUN_USER:" "$GUPPI_ETC/hub.env"; chmod 600 "$GUPPI_ETC/hub.env"
 
@@ -811,105 +818,12 @@ echo "── [7/7] guppi-hub launcher ──"
 # NOT a daemon, by design: one foreground command runs the whole bench —
 # NATS + PostgREST + the hub — with all logs in the terminal. Ctrl-C stops
 # everything. Closing the terminal stops it.
+# The supervisor is the CLI's (guppi_cli/hub.py), the same one Windows runs:
+# it reads hub.env for where everything is, refuses a taken port, and its
+# servers die with it however it dies (setpriv --pdeathsig).
 cat > "$LAUNCHER" <<EOF
 #!/usr/bin/env bash
-# Guppi hub — runs the bench servers (NATS + PostgREST + hub) in the
-# FOREGROUND. Ctrl-C (or closing the terminal) stops everything.
-set -euo pipefail
-set -a; . $GUPPI_ETC/hub.env; set +a
-
-# ── Preflight: reap stale guppi servers before binding their ports ──────
-# guppi-hub isn't a daemon. If the last run was killed hard (terminal
-# closed, SSH dropped, power loss, SIGKILL) the trap below never fired and
-# its children linger holding 8000/9222/4222/3010 — the next launch then
-# can't bind. Reap OUR OWN leftovers (matched by their guppi-specific
-# command lines); refuse to stomp on anything else and say what holds it.
-pids_on_port() {   # PIDs LISTENing on TCP port \$1 — ONLY the ones we can see
-  if command -v ss >/dev/null 2>&1; then
-    ss -ltnHp "sport = :\$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u
-  else
-    lsof -tiTCP:"\$1" -sTCP:LISTEN 2>/dev/null | sort -u
-  fi
-}
-port_busy() {   # true if ANYTHING LISTENs on \$1, pid visible or not.
-  # Needed because ss/lsof only attribute PIDs to sockets we own: a leftover
-  # hub running as another user (e.g. root, from an earlier sudo run) shows
-  # up as a listening socket with no pid=, so pids_on_port comes back empty
-  # and the port looks free right up until uvicorn fails to bind.
-  if command -v ss >/dev/null 2>&1; then
-    [ -n "\$(ss -ltnH "sport = :\$1" 2>/dev/null)" ]
-  else
-    [ -n "\$(lsof -iTCP:"\$1" -sTCP:LISTEN 2>/dev/null)" ]
-  fi
-}
-port_blocked() {   # name=\$1 port=\$2 — bail out, naming who to ask
-  echo "" >&2
-  echo "  ✗ port \$2 (\$1) is in use by a process this user can't see —" >&2
-  echo "    most likely a guppi server left behind by a run as another user (root?)." >&2
-  echo "    Find it with:  sudo ss -ltnp \"sport = :\$2\"" >&2
-  echo "    Stop it, then run guppi hub again." >&2
-  exit 1
-}
-proc_cmd() { tr '\0' ' ' < /proc/"\$1"/cmdline 2>/dev/null; }
-is_guppi_proc() {   # true if pid \$1 is one of our servers
-  local cmd; cmd=\$(proc_cmd "\$1") || return 1
-  case "\$cmd" in
-    *"$GUPPI_HOME/src/packages/agent/.venv/bin/uvicorn"*) return 0 ;;
-    *nats/nats.dev.conf*)                                 return 0 ;;
-    *"postgrest $GUPPI_ETC/postgrest.conf"*)              return 0 ;;
-    *) return 1 ;;
-  esac
-}
-preflight_port() {   # name=\$1 port=\$2
-  local pid held=0
-  for pid in \$(pids_on_port "\$2"); do
-    held=1
-    if is_guppi_proc "\$pid"; then
-      echo "   reaping stale \$1 (pid \$pid) holding port \$2 from a previous run"
-      kill "\$pid" 2>/dev/null || true
-    else
-      echo "" >&2
-      echo "  ✗ port \$2 (\$1) is already in use by pid \$pid, which isn't a guppi process:" >&2
-      echo "      \$(proc_cmd "\$pid")" >&2
-      echo "    Stop that process (or free the port), then run guppi hub again." >&2
-      exit 1
-    fi
-  done
-  # Nothing of ours on it, but still occupied => a holder we can't attribute.
-  [ "\$held" = 1 ] || { port_busy "\$2" && port_blocked "\$1" "\$2"; return 0; }
-  # Wait for the port to actually free; escalate to SIGKILL on our own PIDs.
-  local i
-  for i in \$(seq 1 10); do
-    if [ -z "\$(pids_on_port "\$2")" ]; then
-      port_busy "\$2" && port_blocked "\$1" "\$2"   # a second, invisible holder
-      return 0
-    fi
-    sleep 0.5
-  done
-  for pid in \$(pids_on_port "\$2"); do
-    is_guppi_proc "\$pid" && kill -9 "\$pid" 2>/dev/null || true
-  done
-  sleep 1
-  # Still held after SIGKILLing everything we own: say so now rather than
-  # letting the server below die on a bare "address already in use".
-  port_busy "\$2" && port_blocked "\$1" "\$2"
-  return 0
-}
-preflight_port nats-server 4222
-preflight_port nats-server 9222
-preflight_port postgrest  3010
-preflight_port hub        8000
-
-cd "$GUPPI_DATA"   # anchor NATS's relative .nats-data store dir
-/usr/local/bin/nats-server -c "$GUPPI_HOME/src/packages/agent/infrastructure/nats/nats.dev.conf" &
-NATS_PID=\$!
-/usr/local/bin/postgrest "$GUPPI_ETC/postgrest.conf" &
-PGRST_PID=\$!
-cd "$GUPPI_HOME/src/packages/agent"
-"$GUPPI_HOME/src/packages/agent/.venv/bin/uvicorn" app.main:app --host 0.0.0.0 --port 8000 &
-HUB_PID=\$!
-trap 'kill \$HUB_PID \$NATS_PID \$PGRST_PID 2>/dev/null; wait' INT TERM EXIT
-wait \$HUB_PID
+exec "$GUPPI_HOME/src/packages/cli/.venv/bin/python" -m guppi_cli.hub "$GUPPI_ETC/hub.env"
 EOF
 chmod 755 "$LAUNCHER"
 
@@ -949,7 +863,7 @@ smoke_hub() {
   wait "$pid" 2>/dev/null || true
   # Belt and braces: reap any guppi processes the launcher left behind
   # (patterns are guppi-path-specific, nothing else matches them).
-  pkill -f "$GUPPI_HOME/src/packages/agent/.venv/bin/uvicorn" 2>/dev/null || true
+  pkill -f "$GUPPI_HOME/src/packages/agent/.venv/bin/python -m uvicorn" 2>/dev/null || true
   pkill -f "$GUPPI_HOME/src/packages/agent/infrastructure/nats/nats.dev.conf" 2>/dev/null || true
   pkill -f "postgrest $GUPPI_ETC/postgrest.conf" 2>/dev/null || true
   sleep 1

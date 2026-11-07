@@ -36,6 +36,30 @@ Only want the hub on this machine — because the instruments are wired to a
 different one? Add `--no-rack`, and see
 [A bench split across two machines](#a-bench-split-across-two-machines).
 
+### On Windows
+
+Windows 10 (1803 or later) or 11, in a normal PowerShell — no administrator:
+
+```
+irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1 | iex
+```
+
+It installs the same hub and rack for your user only, in
+`%LOCALAPPDATA%\Guppi`, with a private PostgreSQL on `127.0.0.1` (nothing
+system-wide, no services), and adds `guppi` to your PATH: open a new terminal
+afterwards. The rack's settings live in `%USERPROFILE%\.guppi`, as on Linux.
+Re-run it to upgrade; `-Uninstall` removes it (`-Purge` deletes the data too).
+
+What differs from Linux:
+
+- **USB instruments** need NI-VISA or Keysight IO Libraries installed (the rack
+  uses either automatically), or the instrument bound to WinUSB with Zadig.
+  LAN and serial instruments need nothing extra.
+- **Network discovery** finds instruments by mDNS, VXI-11 and a TCP sweep, but
+  can't add a temporary address to reach an instrument on another subnet.
+- **MCC DAQ boxes** aren't supported on Windows yet.
+- **Windows on ARM** runs the x64 build under emulation.
+
 ## 3. Run the bench
 
 ```

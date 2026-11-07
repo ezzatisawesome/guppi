@@ -90,8 +90,11 @@ deny in one step. `guppi control` with no argument shows the current setting.
 
 ```
 guppi catalog [filter] [--kind signal|capability] [--values] [--rig R]
-guppi query <path…> [--since 1h] [--until now] [--buckets 2000|raw] [--format json|csv] [--rig R]
-guppi runs [EXECUTION] [--bundle [DIR]] [--limit N] [--rig R]
+guppi query <path…> [--since 1h] [--until now | --run EXECUTION] [--buckets 2000|raw] [--format json|csv] [--rig R]
+guppi runs [--since 7d] [--status fail] [--dut SERIAL] [--limit N] [--rig R]
+guppi runs EXECUTION [--log [--src test,rack,instrument]] [--bundle [DIR]] [--rig R]
+guppi artifacts [ARTIFACT] [--run EXECUTION] [--out [FILE]] [--limit N] [--rig R]
+guppi recordings [--since 3d] [--limit N] [--rig R]
 ```
 
 - `catalog` — every signal and command the rig exposes, with its real path.
@@ -110,13 +113,25 @@ guppi runs [EXECUTION] [--bundle [DIR]] [--limit N] [--rig R]
   rolled up: their rows are the raw samples, `value` the string. `--format csv`
   is ready for pandas:
   `guppi query psu1.1.voltage psu1.1.current --since 12h --format csv > soak.csv`.
-- `runs` — test runs, newest first; with an id, one run in full, including
-  its measurements and time window; `--bundle [DIR]` writes that run's
+  `--run EXECUTION` takes the window from a test run instead (`--since`/`--until`
+  then can't be given).
+- `runs` — test runs, newest first. `--since`, `--status` and `--dut` filter
+  them, searching the newest 200 runs (a note on stderr says when older
+  matches may be missing). With an id, one run in full, including its
+  measurements and time window; `--log` prints its whole log, DEBUG included
+  (`--src` keeps some sources, `--json` gives one object per line); `--bundle [DIR]` writes that run's
   `run.json`, `measurements.csv`, `run.log` (the run's log as text: time,
   level, source `test`/`rack`/`instrument`, device, logger, message) and
-  captured waveforms (`scope/`) to a folder.
+  captured waveforms (`scope/`, one CSV row per sample) to a folder.
+- `artifacts` — captured scope waveforms, screenshots and other files,
+  newest first, whether or not a test run took them (`--run` keeps one run's).
+  With an id (a prefix is enough), its metadata; `--out [FILE]` saves it: a
+  waveform as a CSV of every sample (`t` in seconds from the trigger, `value`) plus a `.json`
+  of its metadata, anything else byte for byte.
+- `recordings` — the rig's recordings with their start and end times; pass
+  those to `query --since/--until` to read one.
 
-For `--bundle`, `EXECUTION` may be a prefix; omit it to take the latest run.
+`EXECUTION` may be a prefix everywhere; for `--bundle`, omit it to take the latest run.
 `DIR` defaults to `run-<date>-<id>/`.
 
 ### Upload data files
