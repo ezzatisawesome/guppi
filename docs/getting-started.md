@@ -51,14 +51,50 @@ afterwards. The rack's settings live in `%USERPROFILE%\.guppi`, as on Linux.
 Re-run it to upgrade. `guppi uninstall` removes it and keeps your data; set
 `$env:GUPPI_PURGE_DATA = '1'` first to delete the data too.
 
+Step by step, on a new PC:
+
+1. **Open PowerShell from the Start menu**, as yourself. If its prompt reads
+   `PS C:\WINDOWS\system32>`, that's an administrator window: close it and
+   open a normal one.
+2. **Paste the command above.** The first run takes a few minutes, because it
+   downloads Python and PostgreSQL. It ends with "Guppi … is installed". At
+   its last step, Windows asks about the firewall (see below).
+3. **Open a new PowerShell window from the Start menu**, and run `guppi up`.
+   A window that was already open still has the old PATH, and answers
+   "'guppi' is not recognized". That includes a terminal inside another app,
+   such as an editor.
+4. **Open the address `guppi up` prints** (`http://<this PC's address>:8000`),
+   or `http://localhost:8000` on this PC. Another computer or a phone on the
+   same network uses the printed address, if you allowed the firewall prompt.
+5. **Plug in your instruments.** The dashboard offers to add what the rack
+   finds: choose **Add to rig**. USB instruments need a VISA driver first
+   (see below).
+6. **To keep readings, record them.** Watching live doesn't save readings
+   (the log and notes are always kept). Open a dashboard (Pages ▸ New ▸
+   Dashboard), and press **Record** at the top. Press it again to stop. A
+   test run records itself.
+7. **Stop with Ctrl-C** in the `guppi up` window. Nothing starts by itself
+   after a reboot: run `guppi up` again.
+
 It needs ports 8000, 4222, 9222, 3010 and 55432. If another program holds one,
 the installer names that program and stops before changing anything: stop it
 and re-run. Port 8080, the rack's, only gets a warning.
 
 Its last step starts the hub once, and Windows asks whether `python`,
-`nats-server` and `postgrest` may accept connections from your network.
-**Allow** (Windows asks for administrator approval) to open the dashboard from
-other computers; **Cancel** keeps Guppi to this PC, where it works either way.
+`nats-server` and `postgrest` may accept connections from your network. That
+answer decides who else can open the dashboard:
+
+- **Allow on Private networks** (Windows asks for administrator approval) to
+  open it from other computers on your bench network. Windows calls a network
+  it hasn't seen before Public: for one you trust, set it to Private first
+  (Settings ▸ Network & internet ▸ your network ▸ Network profile type).
+- **Don't tick Public networks.** Guppi has no login on your own network, so
+  anyone on a café or conference Wi-Fi could use your instruments.
+- **Cancel** keeps the dashboard to this PC.
+
+If Scan misses an instrument you can reach, add it by address, or allow `python`
+in Windows Security ▸ Firewall & network protection ▸ Allow an app through
+firewall.
 
 What differs from Linux:
 
@@ -69,6 +105,16 @@ What differs from Linux:
   can't add a temporary address to reach an instrument on another subnet.
 - **MCC DAQ boxes** aren't supported on Windows yet.
 - **Windows on ARM** runs the x64 build under emulation.
+- **Sleep:** while the hub or the rack runs, Windows won't put the PC to sleep
+  for being idle (the screen can still turn off). Choosing Sleep, or closing a
+  laptop's lid, still sleeps it and pauses the bench. For long tests keep a
+  laptop plugged in, and set its lid to "Do nothing" when plugged in.
+- **Windows Update** can restart the PC outside your active hours and end a
+  running test: for an overnight or weekend run, set active hours to cover it,
+  or pause updates.
+- **Closing the `guppi up` window** stops the bench the way Ctrl-C does: the
+  rack gets the stop request and releases your instruments, within the 5
+  seconds Windows gives a closing window.
 
 ## 3. Run the bench
 
@@ -124,6 +170,10 @@ Sanity check:
 curl http://localhost:8000/health
 # → {"status":"ok","mode":"local","postgres":"ok"}
 ```
+
+On Windows, type `curl.exe`. In Windows PowerShell, `curl` is a different
+command (`Invoke-WebRequest`): it asks a security question, then prints the
+response's details instead of the JSON.
 
 > Everything Guppi lives under the one `guppi` command: `guppi up` (the whole
 > bench), `guppi hub` / `guppi rack …` (either half), and `guppi run` /
@@ -244,9 +294,12 @@ cd libuldaq-1.2.1 && ./configure && make -j"$(nproc)" && sudo make install && su
 ## 5. Use it
 
 - **Dashboard** — live signals from every instrument the rack found.
-- **Data viewer** — history over any time window; telemetry is kept
-  indefinitely (prune channels you don't need from the Storage tab to reclaim
-  space), and test executions and captured artifacts are kept.
+- **Data viewer** — history over any time window, for what was recorded.
+  Readings are saved only while recording (the log and notes always are):
+  press **Record** at the top of a dashboard, or run a test, which records
+  itself. Recorded telemetry is kept indefinitely
+  (prune channels you don't need from the Storage tab to reclaim space), and
+  test executions and captured artifacts are kept.
 - **Tests** — run OpenHTF test scripts against the bench with `guppi run`, and
   watch them in the data view's Runs panel. A run records itself; its verdict, measurements, log and
   captures are one click away. [How a test runs](how-a-test-runs.md) is the

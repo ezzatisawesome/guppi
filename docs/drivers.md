@@ -275,9 +275,11 @@ class MyMeter(Device):
     # class name if omitted.
     device_type = "MyMeter"
 
-    # Substrings matched (case-insensitively) against the instrument's *IDN?
-    # reply, so the rack's scan can auto-detect it. Leave empty to only
-    # support explicit declaration in rig_config.yml.
+    # Model tokens matched against the maker and model fields of the
+    # instrument's *IDN? reply (never its serial or firmware), ignoring case
+    # and separators, so the rack's scan can auto-detect it. The longest
+    # token wins; if two drivers tie, the scan lists both and adopts neither.
+    # Leave empty to only support explicit declaration in rig_config.yml.
     idn_models = ("MYMETER-2000",)
 
     # Short category for auto-labels of discovered units (meter1, meter2, …).

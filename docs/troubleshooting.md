@@ -88,9 +88,20 @@ The installer is idempotent — fix the cause and re-run it. Common causes:
 - **No network / GitHub unreachable** — the installer downloads release assets
   from github.com; it needs internet *once*, at install time. The bench runs
   offline afterwards.
+- **A company network (Windows), stopped at step 4** — the installer has uv use
+  Windows' certificates and the proxy Windows finds, automatic configuration
+  (a PAC script) included. If uv still can't download, set your proxy before
+  running it, then re-run: `$env:HTTPS_PROXY = 'http://proxy.example.com:8080'`
+  (ask IT for the address). uv also needs to reach github.com (for Python) and
+  pypi.org and files.pythonhosted.org (for packages).
 - **`No public release found`** — you're ahead of us; check the
   [releases page](https://github.com/ezzatisawesome/guppi/releases) exists and
   has assets, or pin one with `GUPPI_REF=v0.1.0`.
+- **`rest exited — stopped the hub` (Windows)**: PostgREST, the hub's database
+  API, couldn't start. Up to v0.14.1 the installer left out the PostgreSQL DLL
+  it needs, so this happened on almost every Windows PC. Re-run the install
+  command: the current installer puts the DLL beside PostgREST and checks that
+  it starts.
 
 ## Dashboard doesn't load
 

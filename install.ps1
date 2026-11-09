@@ -10,11 +10,12 @@ installed system-wide and nothing runs as a service. Run `guppi up` to start
 the bench (Ctrl-C stops it), or `guppi hub` / `guppi rack` on their own. The
 rack's settings live in %USERPROFILE%\.guppi, as on Linux.
 
-    src\      the release (hub, rack, CLI) and their Python environments
-    pgsql\    a private PostgreSQL, on 127.0.0.1 only, password-protected
-    bin\      guppi, guppi-hub, guppi-rack, nats-server, postgrest, uv
-    etc\      hub.env (where everything is), postgrest.conf, db.secret
-    data\     the database cluster, NATS's store, run artifacts
+    src\        the release (hub, rack, CLI) and their Python environments
+    pgsql\      a private PostgreSQL, on 127.0.0.1 only, password-protected
+    postgrest\  PostgREST, beside the PostgreSQL client DLLs it loads
+    bin\        guppi, guppi-hub, guppi-rack, nats-server, uv
+    etc\        hub.env (where everything is), postgrest.conf, db.secret
+    data\       the database cluster, NATS's store, run artifacts
 
 Re-running upgrades in place (stop the bench first); a failed upgrade rolls
 back. Options: -Ref <tag>, -SrcTarball <path> (offline), -Uninstall [-Purge].
@@ -55,6 +56,7 @@ $Repo = 'ezzatisawesome/guppi'
 $Root = Join-Path $env:LOCALAPPDATA 'Guppi'
 $Bin, $Etc, $Data = "$Root\bin", "$Root\etc", "$Root\data"
 $PgDist, $PgData = "$Root\pgsql", "$Root\data\pg"
+$Pgrst = "$Root\postgrest"
 $RackHome = Join-Path $env:USERPROFILE '.guppi'
 # A cluster's data directory belongs to one Postgres major, so an existing
 # install keeps the binaries it was created with; only a new one gets these.
@@ -68,7 +70,8 @@ $NatsFallback, $PostgrestFallback, $UvFallback = 'v2.15.2', 'v16.5', '0.13.7'
 # Environment variables are the process's, not the scope's, and under `iex` the
 # process is the user's PowerShell: the ones set below are put back at the end.
 $SavedEnv = @{}
-foreach ($name in 'UV_PYTHON', 'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'PGPASSWORD', 'PGOPTIONS') {
+foreach ($name in 'UV_PYTHON', 'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_SYSTEM_CERTS', 'UV_NATIVE_TLS',
+                  'HTTP_PROXY', 'HTTPS_PROXY', 'PGPASSWORD', 'PGOPTIONS') {
     $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
 try {
@@ -76,6 +79,13 @@ try {
 $env:UV_PYTHON = 'cpython-3.12-windows-x86_64-none'
 $env:UV_PYTHON_INSTALL_DIR = "$Root\python"
 $env:UV_CACHE_DIR = "$Root\cache\uv"
+# A company network that inspects TLS re-signs every site with its own root CA,
+# which Windows trusts and PowerShell's downloads (steps 1-3) use. uv trusts only
+# the roots it ships unless told otherwise, so step 4 failed there on a
+# certificate error. UV_NATIVE_TLS is the same switch for a uv older than 0.11
+# (-Cli uses one already on PATH); a newer uv ignores it when this is set.
+$env:UV_SYSTEM_CERTS = 'true'
+$env:UV_NATIVE_TLS = 'true'
 
 # Never `exit`: run as `irm ... | iex`, it would close the user's window and
 # the message with it. A throw ends the install, and -File still exits 1.
@@ -163,6 +173,35 @@ function PortsInUse([hashtable]$ports) {
         }
 }
 
+# The proxy Windows gives $url, as "http://host:port"; $null for a direct
+# connection, or when it can't be worked out.
+function SystemProxy([string]$url) {
+    try {
+        $uri = [Uri]$url
+        $proxy = [Net.WebRequest]::GetSystemWebProxy().GetProxy($uri)
+        if ($proxy -and $proxy.Authority -ne $uri.Authority) { return "$($proxy.Scheme)://$($proxy.Authority)" }
+    } catch { }
+    return $null
+}
+
+# uv reads a fixed proxy from the registry but never a PAC script, which is how
+# many company networks hand one out: there its downloads went direct and failed
+# while PowerShell's went through. For the uv steps only (the hub inherits none
+# of it), hand uv the proxy Windows resolves, unless the user named one.
+function UseWindowsProxyForUv {
+    if ($env:HTTPS_PROXY -or $env:ALL_PROXY) { return }
+    $proxy = SystemProxy 'https://files.pythonhosted.org/'
+    if ($proxy) {
+        $env:HTTPS_PROXY, $env:HTTP_PROXY = $proxy, $proxy
+        Note "uv downloads through Windows' proxy, $proxy"
+    }
+}
+
+# Put back what the user's session had for these (see $SavedEnv).
+function RestoreEnv([string[]]$names) {
+    foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process') }
+}
+
 function Secret {
     $bytes = New-Object byte[] 24
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
@@ -242,8 +281,10 @@ if ($Cli -or $env:GUPPI_CLI -eq '1') {
         New-Item -ItemType Directory "$Tmp\src" | Out-Null
         Run tar.exe @('-xzf', "$Tmp\guppi-src.tar.gz", '-C', "$Tmp\src", '--strip-components=1') 'extracting the release'
         Step 'the guppi CLI'
+        UseWindowsProxyForUv
         Run $uv @('tool', 'install', '--force', '--python', '3.12', "$Tmp\src\packages\cli") 'uv tool install'
         $toolBin = (& $uv tool dir --bin).Trim()
+        RestoreEnv 'HTTP_PROXY', 'HTTPS_PROXY'
         Run "$toolBin\guppi.exe" @('--help') 'guppi --help' | Out-Null
         UserPath $toolBin $true
         Write-Host "OK  guppi $Ref installed: $toolBin\guppi.exe" -ForegroundColor Green
@@ -259,7 +300,7 @@ if ($Cli -or $env:GUPPI_CLI -eq '1') {
 if ($Uninstall) {
     RefuseWhileRunning 'uninstall again'
     # What this installer made, by name: a folder called Guppi may hold someone else's files too.
-    $ours = @('src', 'src.prev', 'ui', 'ui.prev', 'bin', 'python', 'cache', 'pgsql')
+    $ours = @('src', 'src.prev', 'ui', 'ui.prev', 'bin', 'postgrest', 'python', 'cache', 'pgsql')
     if ($Purge) { $ours += 'etc', 'data' }
     foreach ($d in $ours) { Remove-Item -Recurse -Force "$Root\$d" -ErrorAction SilentlyContinue }
     $stuck = @($ours | Where-Object { Test-Path "$Root\$_" })
@@ -297,7 +338,7 @@ foreach ($line in @(PortsInUse @{ $RackPort = 'the rack' })) {
     Warn "$line. guppi up needs it too: stop that program first, or set RACK_PORT to a free port."
 }
 
-New-Item -ItemType Directory -Force $Root, $Bin, $Etc, $Data, "$Data\artifacts", $RackHome | Out-Null
+New-Item -ItemType Directory -Force $Root, $Bin, $Pgrst, $Etc, $Data, "$Data\artifacts", $RackHome | Out-Null
 $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("guppi-install-" + [guid]::NewGuid())
 New-Item -ItemType Directory $Tmp | Out-Null
 try {
@@ -367,7 +408,7 @@ $pgrstTag = LatestTag 'PostgREST/postgrest' $PostgrestFallback
 # PostgREST publishes no checksums; the download is over TLS from its own releases.
 Fetch "https://github.com/PostgREST/postgrest/releases/download/$pgrstTag/postgrest-$pgrstTag-windows-x86-64.zip" "$Tmp\postgrest.zip"
 Expand-Archive -Force "$Tmp\postgrest.zip" "$Tmp\postgrest"
-Copy-Item -Force "$Tmp\postgrest\postgrest.exe" "$Bin\postgrest.exe"
+Copy-Item -Force "$Tmp\postgrest\postgrest.exe" "$Pgrst\postgrest.exe"
 Note "uv $uvTag, nats-server $natsTag, PostgREST $pgrstTag"
 
 # ── 3. PostgreSQL ────────────────────────────────────────────────────────────
@@ -385,6 +426,20 @@ if (-not (Test-Path "$PgDist\bin\postgres.exe")) {
     Note 'keeping the installed PostgreSQL (its cluster is tied to its version)'
 }
 $PgBin = "$PgDist\bin"
+
+# PostgREST's Windows build loads PostgreSQL's client library (libpq.dll and
+# whatever it loads), which its zip leaves out. Windows looks first beside the
+# program, so PostgreSQL's DLLs go there, all of them so a new PostgreSQL build
+# can't add a dependency we didn't list, and on every run so they match the
+# PostgreSQL this install keeps. Not into bin\: that's on PATH, where other
+# programs would pick them up.
+Copy-Item -Force "$PgBin\*.dll" $Pgrst
+$rc = Quietly "$Pgrst\postgrest.exe" @('--version')
+if ($rc -eq -1073741515) {  # 0xC0000135, STATUS_DLL_NOT_FOUND
+    Fail "PostgREST can't start: Windows can't find a DLL it needs in $Pgrst. Please report this, with this screen: https://github.com/$Repo/issues"
+} elseif ($rc -ne 0) {
+    Fail "PostgREST can't start (exit code $rc). See what it says: & `"$Pgrst\postgrest.exe`" --version"
+}
 
 # One secret file, kept across upgrades: the database's three passwords.
 $secretFile = "$Etc\db.secret"
@@ -412,6 +467,7 @@ port = $PgPort
 
 # ── 4. Python environments ───────────────────────────────────────────────────
 Step '4/7 Python environments (the first run downloads Python)'
+UseWindowsProxyForUv
 foreach ($pkg in @(@($Agent, 'import fastapi, uvicorn, asyncpg'), @($Cli, 'import guppi_cli.hub'),
                    @($Rack, 'import pyvisa, serial'))) {
     $dir, $check = $pkg
@@ -426,6 +482,7 @@ foreach ($pkg in @(@($Agent, 'import fastapi, uvicorn, asyncpg'), @($Cli, 'impor
         Run ".venv\Scripts\python.exe" @('-c', $check) "the $(Split-Path -Leaf $dir) venv doesn't import"
     } finally { Pop-Location }
 }
+RestoreEnv 'HTTP_PROXY', 'HTTPS_PROXY'  # the hub, started at step 7, gets the session's own
 
 # ── 5. Database: roles, schema ───────────────────────────────────────────────
 Step '5/7 Database'
@@ -466,7 +523,7 @@ GUPPI_DATA_DIR="$Data"
 GUPPI_UI_DIR="$Root\ui"
 GUPPI_NATS_SERVER="$Bin\nats-server.exe"
 GUPPI_NATS_CONF="$Agent\infrastructure\nats\nats.dev.conf"
-GUPPI_POSTGREST="$Bin\postgrest.exe"
+GUPPI_POSTGREST="$Pgrst\postgrest.exe"
 GUPPI_POSTGREST_CONF="$Etc\postgrest.conf"
 GUPPI_AGENT_DIR="$Agent"
 GUPPI_AGENT_PYTHON="$Agent\.venv\Scripts\python.exe"
@@ -522,8 +579,9 @@ UserPath $Bin $true
 # ── 7. Check it starts ───────────────────────────────────────────────────────
 Step '7/7 Starting the hub once to check it answers'
 # The hub serves the dashboard to the LAN, so Windows asks the first time it listens.
-Note 'Windows may ask to let python, nats-server and postgrest through its firewall:'
-Note 'allow it to open the dashboard from other computers, or Cancel to keep it to this one.'
+Note 'Windows may ask to let python, nats-server and postgrest through its firewall.'
+Note 'Allow on Private networks to open the dashboard from other computers (not Public:'
+Note 'there is no login on your own network). Cancel keeps the dashboard to this PC.'
 $hub = Start-Process -PassThru -WindowStyle Hidden -FilePath "$Cli\.venv\Scripts\python.exe" `
     -ArgumentList @('-m', 'guppi_cli.hub', "`"$Etc\hub.env`"") `
     -RedirectStandardOutput "$Tmp\hub.out" -RedirectStandardError "$Tmp\hub.err"
@@ -549,6 +607,9 @@ if (-not $ok) {
     Fail "the hub didn't answer on :8000 within 60 s. Its log is above."
 }
 Remove-Item -Recurse -Force "$Root\src.prev", "$Root\ui.prev" -ErrorAction SilentlyContinue
+# Where earlier releases put PostgREST, without its DLLs. Only now: until the
+# hub.env above, a rolled-back or half-done upgrade still pointed there.
+Remove-Item -Force "$Bin\postgrest.exe" -ErrorAction SilentlyContinue
 Set-Content -Encoding ascii "$Etc\version" $Ref
 
 } finally {
