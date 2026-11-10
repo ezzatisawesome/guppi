@@ -75,22 +75,32 @@ hand when writing config yourself — use the family driver name for any member.
 
 #### Streaming scope measurements
 
-A Keysight InfiniiVision scope streams each channel's frequency on its own. To
-stream other measurements, list them as `channel.measurement`:
+Every scope records per-channel measurements, by the same names on every
+make. Nothing is measured until you pick it. On the **Instruments** page,
+open the scope's **Readings** and tick cells in the channel × measurement
+grid. A change applies to the running rack straight away, with no restart. In
+config, list them as `channel.measurement`:
 
 ```yaml
 - id: scope1
-  type: KeysightInfiniiVision3000T
-  measurements: ["1.vpp", "1.vrms", "2.vavg", "2.rise"]
+  type: SiglentSDSLegacy
+  measurements: ["1.vavg", "1.vpp", "2.vrms", "2.frequency"]
 ```
 
-Each becomes a normal signal (`scope1.1.vpp`) you can plot, record and bind,
-and costs one query per tick. The choices are `vavg`, `vrms`, `vrms_ac`, `vpp`,
-`vmax`, `vmin`, `vamplitude`, `vtop`, `vbase`, `overshoot`, `preshoot`,
-`frequency`, `period`, `rise`, `fall`, `pwidth`, `nwidth`, `duty`, `nduty`.
-On the **Instruments** page this is a channel × measurement tick grid, and a
-change applies to the running rack straight away — no restart. Measurements
-run on what is on screen, so set the timebase first.
+Each becomes a normal signal (`scope1.1.vavg`) you can plot, record and bind,
+and costs one query per tick. The names are `vavg` (mean), `vrms`, `vrms_ac`,
+`vpp`, `vmax`, `vmin`, `vamplitude`, `vtop`, `vbase`, `overshoot`,
+`preshoot`, `frequency`, `period`, `rise`, `fall`, `pwidth`, `nwidth`,
+`duty` and `nduty`. A scope offers the ones its command set has, and every
+scope has `vavg`. Measurements run on what is on screen, so set the timebase
+first.
+
+#### Choosing DAQ channels
+
+A Keysight DAQ970A, 34980A or Rigol M300 measures the channels in its scan
+list. They show in the same **Readings** grid, one `101.reading` cell per
+multiplexer channel of the modules it found. Ticking one adds it to
+`channels:` and applies it live.
 
 ### Shape 2 — driver-owned transport (CAN/I²C/SPI/HTTP boards, DUTs)
 
