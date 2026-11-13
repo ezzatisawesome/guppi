@@ -93,7 +93,8 @@ the readings, and they are stored whether or not anything is recording.
 
 ```
 guppi runs 69958239 --bundle        # run.json, measurements.csv, run.log, scope/
-guppi query psu1.1.voltage system.log --since <started_at> --until <completed_at>
+guppi runs 69958239 --log --src test  # the script's own log lines
+guppi query psu1.1.voltage system.log --run 69958239   # readings and log over the run
 ```
 
 ## Timeline

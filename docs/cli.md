@@ -23,7 +23,7 @@ default: `GUPPI_TOKEN` / config; not needed on a local bench), and `--json`.
 ```
 guppi use [HUB] [--force]                # which bench or hub this CLI talks to
 guppi login [--headless] [--code] [--password]  # sign the CLI in to your account
-guppi rigs                               # list rigs; with several, pick the default rig
+guppi rigs                               # list rigs (and whether each is online); with several, pick the default
 guppi control [cloud|local|URL|allow|deny]   # the rack on this box (run it there)
 ```
 
@@ -105,7 +105,10 @@ guppi recordings [--since 3d] [--limit N] [--rig R]
   signal's current value, read live from the rig (narrow it with a filter:
   `guppi catalog psu1 --values`). `--all` lists every setting and command of
   each device, including the groups the catalog leaves out (a scope's decode,
-  math, wavegen, ...); filter it as `DEVICE` or `DEVICE.TEXT`.
+  math, wavegen, ...); filter it as `DEVICE` or `DEVICE.TEXT`. An entry whose
+  device isn't reading says so: its `health` is `{state, error}` with state
+  `ok`, `degraded`, `quarantined`, `connecting` or `offline` (`guppi rigs`
+  reports a rig's the same way, from its heartbeat).
 - A command that fails says so in the terminal, and also leaves a trace:
   `~/.guppi/logs/cli.log` (UTC, the telemetry clock) and — when it was about a
   rig the hub can reach — a line on that rig's `system.log`, so the failure
@@ -144,6 +147,7 @@ guppi recordings [--since 3d] [--limit N] [--rig R]
 ```
 guppi set <path> <value> [--rig R]
 guppi send <path> [JSON params] [--rig R]
+guppi reload-driver <device> [--rig R]
 ```
 
 - `set` changes one setting by its path and prints the value the instrument
@@ -154,7 +158,11 @@ guppi send <path> [JSON params] [--rig R]
   one of its options.
 - `send` runs a command: `guppi send scope1.single`,
   `guppi send scope1.measure '{"measurement": "vpp", "channel": 1}'`.
-- Paths come from `guppi catalog <device> --all`. Both need the hub to be
+- `reload-driver` re-imports a device's own driver (a `drivers:` path or
+  `GUPPI_DRIVER_PATH`) after you edit it, closes the device and opens it again
+  with the new code; the rest of the bench keeps running. Refused while a
+  running test uses the device, and for drivers built into Guppi.
+- Paths come from `guppi catalog <device> --all`. All three need the hub to be
   allowed to actuate the bench (`guppi control allow`).
 
 ### Upload data files
@@ -181,7 +189,7 @@ fine; the CLI shows progress. Details: [Uploading data files](uploading-data.md)
 ## Run tests
 
 ```
-guppi run [<test>] [--rig R] [--dut SERIAL] [--step] [--resume-from PHASE] [-y]
+guppi run [<test>] [--rig R] [--dut SERIAL] [--step] [--resume-from PHASE] [-v] [-y]
 guppi abort [--rig R]      # stop the running test
 ```
 
@@ -197,6 +205,9 @@ answered inline in your terminal.
 - `--dut SERIAL` — record the DUT serial on the execution.
 - `--step` — pause for confirmation before every phase (debug overlay; the
   gates never appear in the results).
+- `-v` — also stream the rack's own INFO lines. By default the run prints the
+  test's lines and the rack's warnings and errors; `guppi runs <id> --log`
+  has every line either way.
 - `--resume-from PHASE` — re-run a finished run from this phase onward
   (see [Writing tests §8](openhtf-authoring-guide.md#8-sweeps-and-resume)).
 `guppi abort` (or Ctrl-C during `guppi run`) stops the running test: the
@@ -258,8 +269,10 @@ their limits even though the bench itself needs no login.
 
 Scripts and coding agents:
 
-- `--json` prints one JSON document on stdout; errors print as
-  `{"error": ..., "message": ...}` on stderr.
+- `--json` prints one JSON document on stdout; every error, a mistyped flag
+  included, prints as `{"error": ..., "message": ...}` on stderr.
+- An execution id may be shortened to any unique prefix (the 8 characters
+  `guppi run` prints) wherever a command takes one.
 - Nothing prompts without a terminal. A command that would ask fails instead
   and names the flag to pass (`-y`, `--yes`). On a box with no browser, sign in
   with `guppi login --headless`. Give scripts and agents an API key

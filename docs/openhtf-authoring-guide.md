@@ -138,8 +138,9 @@ shared across phases and runs.
 | `plugs.PSU1`, `plugs.LOAD1`, … | — | the plug for each rig device, by its config id |
 | `sleep` | `(seconds) -> None` | `time.sleep` that a stop interrupts at once. Use it for every settle and soak: a plain `time.sleep(60)` holds a stop for the full minute, because OpenHTF can only interrupt a phase between Python bytecodes |
 | `capture_artifact` | `(path, waveform, phase=None) -> ref` | publish a **uniform numeric series** by reference (a scope trace, or one metric of a sweep), stamped with the run's `execution_id`. `waveform` must be `{"v": [floats], "sample_rate": float, "t0"?: float, "unit"?: str}`; **only `v` is stored** (compact f32) and the axis is rebuilt from `(t0, sample_rate, n)`. Any dict lacking `"v"` raises `KeyError`. Raises if no artifact store is configured. |
-| `safe_shutdown` | `() -> None` | de-energize every output on the rig. Use it in a phase's `finally`. |
-| `arm_guard` | `(path, op, threshold, min_duration=0.0) -> ids` | arm a **run-scoped** watchdog abort-limit (L1). The rack disarms exactly what it armed when the run ends — pass, fail, stop, or timeout (§6). |
+| `safe_shutdown` | `() -> None` | de-energize every output on the rig. Use it in a phase's `finally`. Every output is tried; if one did not turn off it raises `DeEnergizeError` naming it, the run ends in error, the rig latches a safety trip, and the off is sent again when that instrument reconnects. |
+| `arm_guard` | `(path, op, threshold, min_duration=0.0, scope="run") -> ids` | arm a watchdog abort-limit (L1). `scope="run"`: the rack disarms exactly what it armed when the run ends — pass, fail, stop, or timeout (§6). `scope="phase"`: disarmed when the phase that armed it ends. |
+| `disarm_guard` | `(ids) -> None` | disarm guards this run armed before their scope ends. |
 | `grid` | `(**axes) -> list[point]` | build a Cartesian setpoint matrix |
 | `sweep` | `(points, apply, measure, *, settle_s=0.0, on_point=None) -> rows` | drive the matrix: command → settle → measure |
 | `prompt` | `(text, kind="confirm", timeout_s=None) -> Any` | pause the phase and ask a human/agent |
@@ -276,7 +277,13 @@ Notes:
   armed, and the **rack** disarms exactly those when the run ends — on pass,
   fail, stop, or timeout alike. A
   guard never leaks into the next run and you never write disarm code.
-  Persistent guards belong in `rig_config.yml`.
+  One exception: if the run leaves an output on, its guards stay armed until
+  the next run starts. `scope="phase"` limits a guard to its phase (a 1 A
+  charge-direction limit for a discharge phase that a later 5 A charge phase
+  must not trip). Persistent guards belong in `rig_config.yml`.
+- **Outputs are read back after every run.** After an error or a stop, any
+  output that still reads on is turned off and read again. One that won't
+  turn off fails the run (`outputs_left_on`) and latches the rig.
 - **Thresholds are signed** for bidirectional supplies. A regenerative supply
   sinking current reads negative — arm one limit per direction (e.g. `>`, `80`
   for source OC and `<=`, `-40` for sink OC).

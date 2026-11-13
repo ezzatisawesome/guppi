@@ -27,8 +27,12 @@ Four sources, merged in this order (later wins on name collisions):
        - "/home/me/my-board-firmware/tools/driver"
    ```
 
-Drivers load at rack startup — after adding a `drivers:` entry or editing
-driver code, **restart `guppi rack`** to pick it up (there is no hot reload).
+Drivers load at rack startup — after adding a `drivers:` entry, **restart
+`guppi rack`** to pick it up. After editing a driver loaded from a path (a
+`drivers:` entry or `GUPPI_DRIVER_PATH`), `guppi reload-driver <device>`
+re-imports it and reopens that device with the new code while everything else
+keeps running; it is refused while a running test uses the device. A built-in
+driver still needs a restart.
 The startup log prints a `Loaded N driver(s) from …` line for the two path
 sources — `GUPPI_DRIVER_PATH` and `drivers:` — so that line is the one to look
 for after adding your own; built-ins and entry-point drivers are reported
@@ -579,7 +583,10 @@ The rack guards this: any `/dev/...` port a driver-owned device opens is
 claimed before `connect()`, so two devices resolving to the *same* node fail
 fast with an actionable "already in use" message instead of fighting over it.
 The guard catches a *colliding* pin; `by-id` prevents the collision in the
-first place. Auto-detect (leaving `port:` unset) can still grab a neighbour's
+first place. And when a board reboots and re-enumerates (`ttyACM1` becomes
+`ttyACM2`), its `by-id` link follows it while the open handle still points at
+the old node: the rack notices the link now names another node and reopens
+the device through it, moving the port claim along. Auto-detect (leaving `port:` unset) can still grab a neighbour's
 port — always pin USB serial ports.
 
 ## A driver-owned example — controlling an eval board
