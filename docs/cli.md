@@ -92,7 +92,8 @@ deny in one step. `guppi control` with no argument shows the current setting.
 ## Data
 
 ```
-guppi catalog [filter] [--kind signal|capability] [--values] [--all] [--rig R]
+guppi catalog [filter] [--kind signal|capability] [--values] [--all] [--plain] [--rig R]
+guppi doctor [--rig R]
 guppi query <path…> [--since 1h] [--until now | --run EXECUTION] [--buckets 2000|raw] [--format json|csv] [--rig R]
 guppi runs [--since 7d] [--status fail] [--dut SERIAL] [--limit N] [--rig R]
 guppi runs EXECUTION [--log [--src test,rack,instrument]] [--bundle [DIR]] [--rig R]
@@ -100,6 +101,13 @@ guppi artifacts [ARTIFACT] [--run EXECUTION] [--out [FILE]] [--limit N] [--rig R
 guppi recordings [--since 3d] [--limit N] [--rig R]
 ```
 
+- `doctor` — what's wrong with the rig in one read, worst first: a latched
+  safety trip, offs that didn't go through, devices not answering, degraded
+  or dropping their link repeatedly, outputs that are on, a running test; then
+  each device's state, rate and hidden groups. Exits 1 on an error (a trip, an
+  off that didn't go through, a device down); warnings alone exit 0.
+- `catalog --plain` — tab-separated for scripts: kind, path, unit, value
+  (JSON), device state, error. Nothing is appended to a value.
 - `catalog` — every signal and command the rig exposes, with its real path.
   Use these paths in dashboards, sequences and queries. `--values` adds each
   signal's current value, read live from the rig (narrow it with a filter:
@@ -146,8 +154,9 @@ guppi recordings [--since 3d] [--limit N] [--rig R]
 
 ```
 guppi set <path> <value> [--rig R]
-guppi send <path> [JSON params] [--rig R]
+guppi send <path> [key=value ... | JSON params] [--rig R]
 guppi reload-driver <device> [--rig R]
+guppi rack restart [--rig R]
 ```
 
 - `set` changes one setting by its path and prints the value the instrument
@@ -157,12 +166,19 @@ guppi reload-driver <device> [--rig R]
   The value is converted to what the setting takes: a number, `on`/`off`, or
   one of its options.
 - `send` runs a command: `guppi send scope1.single`,
+  `guppi send scope1.measure measurement=vpp channel=1` (each value is read as
+  JSON when it parses, else as text), or one JSON object:
   `guppi send scope1.measure '{"measurement": "vpp", "channel": 1}'`.
 - `reload-driver` re-imports a device's own driver (a `drivers:` path or
   `GUPPI_DRIVER_PATH`) after you edit it, closes the device and opens it again
   with the new code; the rest of the bench keeps running. Refused while a
   running test uses the device, and for drivers built into Guppi.
-- Paths come from `guppi catalog <device> --all`. All three need the hub to be
+- `rack restart` turns every output off and restarts the rack running under
+  `guppi up`, so built-in drivers and the rig config load fresh; the hub stays
+  up. It works from any terminal, or remotely through the hub. Refused while a
+  test runs, if an output won't turn off, or if the rack wasn't started by
+  `guppi up` (then stop and start it yourself).
+- Paths come from `guppi catalog <device> --all`. All of these need the hub to be
   allowed to actuate the bench (`guppi control allow`).
 
 ### Upload data files
@@ -190,8 +206,18 @@ fine; the CLI shows progress. Details: [Uploading data files](uploading-data.md)
 
 ```
 guppi run [<test>] [--rig R] [--dut SERIAL] [--step] [--resume-from PHASE] [-v] [-y]
+guppi test check <file> [--rig R] [--offline]
 guppi abort [--rig R]      # stop the running test
 ```
+
+`guppi test check` checks a test file without running it: it parses, it has
+one module-level `test = …`, OpenHTF's decorators sit on top (another decorator
+above them drops the phase's options; one below works only with
+`functools.wraps`), and `@htf.PhaseOptions` is on a function the test runs. With a
+rig reachable it also checks every `plugs.X`, the literal signal paths in
+`measure()` / `read_now()` / `arm_guard()` / `wait_until()`, and the command
+names and parameter keys in `invoke()`. `guppi run` on a local file runs the
+offline checks first and won't start on an error.
 
 `<test>` is a saved test name (`tests/<slug>.py` in the rig workspace) or a
 path to a `.py` file — relative, `~`, or absolute (single-box benches, where
