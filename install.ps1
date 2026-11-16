@@ -67,6 +67,7 @@ $HubPorts = @{ 8000 = 'the hub'; 4222 = 'NATS'; 9222 = 'NATS for browsers'; 3010
 $RackPort = if ($env:RACK_PORT -match '^\d+$') { [int]$env:RACK_PORT } else { 8080 }
 # Pinned fallbacks for when the GitHub API rate-limits us (60/hour per IP).
 $NatsFallback, $PostgrestFallback, $UvFallback = 'v2.15.2', 'v16.5', '0.13.7'
+$PostgrestSha256 = '17f595b0d8dd37473d0231417dea07c5ac9f791282ff5b017fae51ff29e5de2f'  # v16.5 windows-x86-64
 # Environment variables are the process's, not the scope's, and under `iex` the
 # process is the user's PowerShell: the ones set below are put back at the end.
 $SavedEnv = @{}
@@ -129,6 +130,17 @@ function SumFor([string]$sums, [string]$name) {
         if ($parts.Count -eq 2 -and $parts[1].TrimStart('*') -eq $name) { return $parts[0] }
     }
     return $null
+}
+
+# Verify a release asset against the release's SHA256SUMS. Fails CLOSED: no
+# SHA256SUMS, or no line for the asset, is a refusal, not a skip.
+# GUPPI_SKIP_VERIFY=1 is the escape hatch for dev builds, and says so loudly.
+function VerifyRelease([string]$file, [string]$name) {
+    if ($env:GUPPI_SKIP_VERIFY -eq '1') { Warn "GUPPI_SKIP_VERIFY=1: $name is NOT being verified. Dev builds only."; return }
+    $sum = SumFor "$Tmp\SHA256SUMS" $name
+    if (-not $sum) { Fail "no checksum for $name on release $Ref (no SHA256SUMS, or $name isn't in it): refusing to install unverified code. (Dev builds only: GUPPI_SKIP_VERIFY=1 skips this check.)" }
+    Verify $file $sum
+    Note "${name}: checksum OK"
 }
 
 function HubAnswers {
@@ -273,10 +285,9 @@ if ($Cli -or $env:GUPPI_CLI -eq '1') {
             if (-not $Ref) { $Ref = LatestTag $Repo '' }
             Step "guppi $Ref"
             $dl = "https://github.com/$Repo/releases/download/$Ref"
-            try { Fetch "$dl/SHA256SUMS" "$Tmp\SHA256SUMS" } catch { Note 'no SHA256SUMS on this release: skipping verification' }
+            try { Fetch "$dl/SHA256SUMS" "$Tmp\SHA256SUMS" } catch { }  # missing: VerifyRelease refuses
             Fetch "$dl/guppi-src.tar.gz" "$Tmp\guppi-src.tar.gz"
-            $sum = SumFor "$Tmp\SHA256SUMS" 'guppi-src.tar.gz'
-            if ($sum) { Verify "$Tmp\guppi-src.tar.gz" $sum; Note 'guppi-src.tar.gz: checksum OK' }
+            VerifyRelease "$Tmp\guppi-src.tar.gz" 'guppi-src.tar.gz'
         }
         New-Item -ItemType Directory "$Tmp\src" | Out-Null
         Run tar.exe @('-xzf', "$Tmp\guppi-src.tar.gz", '-C', "$Tmp\src", '--strip-components=1') 'extracting the release'
@@ -353,17 +364,17 @@ if ($SrcTarball) {
     if (-not $Ref) { $Ref = LatestTag $Repo '' }
     $dl = "https://github.com/$Repo/releases/download/$Ref"
     Note "release $Ref"
-    try { Fetch "$dl/SHA256SUMS" "$Tmp\SHA256SUMS" } catch { Note 'no SHA256SUMS on this release: skipping verification' }
+    try { Fetch "$dl/SHA256SUMS" "$Tmp\SHA256SUMS" } catch { }  # missing: VerifyRelease refuses
     Fetch "$dl/guppi-src.tar.gz" "$Tmp\guppi-src.tar.gz"
-    $sum = SumFor "$Tmp\SHA256SUMS" 'guppi-src.tar.gz'
-    if ($sum) { Verify "$Tmp\guppi-src.tar.gz" $sum; Note 'guppi-src.tar.gz: checksum OK' }
+    VerifyRelease "$Tmp\guppi-src.tar.gz" 'guppi-src.tar.gz'
     if (-not $UiTarball) {
-        try {
-            Fetch "$dl/guppi-ui-local.tar.gz" "$Tmp\guppi-ui-local.tar.gz"
-            $sum = SumFor "$Tmp\SHA256SUMS" 'guppi-ui-local.tar.gz'
-            if ($sum) { Verify "$Tmp\guppi-ui-local.tar.gz" $sum }
+        $haveUi = $true
+        try { Fetch "$dl/guppi-ui-local.tar.gz" "$Tmp\guppi-ui-local.tar.gz" }
+        catch { $haveUi = $false; Note 'no UI bundle on this release: the hub runs API-only' }
+        if ($haveUi) {
+            VerifyRelease "$Tmp\guppi-ui-local.tar.gz" 'guppi-ui-local.tar.gz'
             $UiTarball = "$Tmp\guppi-ui-local.tar.gz"
-        } catch { Note 'no UI bundle on this release: the hub runs API-only' }
+        }
     }
 }
 
@@ -404,9 +415,12 @@ Verify "$Tmp\nats.zip" $sum
 Expand-Archive -Force "$Tmp\nats.zip" "$Tmp\nats"
 Copy-Item -Force (Get-ChildItem -Recurse "$Tmp\nats" -Filter nats-server.exe | Select-Object -First 1).FullName "$Bin\nats-server.exe"
 
-$pgrstTag = LatestTag 'PostgREST/postgrest' $PostgrestFallback
-# PostgREST publishes no checksums; the download is over TLS from its own releases.
+# PostgREST publishes no checksums, so it's pinned: this version, checked against
+# this hash (GitHub's asset digest, matched against the downloaded file). Bump both
+# together.
+$pgrstTag = $PostgrestFallback
 Fetch "https://github.com/PostgREST/postgrest/releases/download/$pgrstTag/postgrest-$pgrstTag-windows-x86-64.zip" "$Tmp\postgrest.zip"
+Verify "$Tmp\postgrest.zip" $PostgrestSha256
 Expand-Archive -Force "$Tmp\postgrest.zip" "$Tmp\postgrest"
 Copy-Item -Force "$Tmp\postgrest\postgrest.exe" "$Pgrst\postgrest.exe"
 Note "uv $uvTag, nats-server $natsTag, PostgREST $pgrstTag"

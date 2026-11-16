@@ -44,7 +44,10 @@
 # Pinning: default is the latest release tag; each release also attaches its
 # own install.sh pre-pinned to that tag (the release workflow substitutes the
 # GUPPI_REF default), so a pinned install is reproducible end-to-end. Release
-# assets are verified against the release's SHA256SUMS when present.
+# assets are verified against the release's SHA256SUMS, and an install with
+# no SHA256SUMS (or no line for an asset) is refused — GUPPI_SKIP_VERIFY=1 is
+# the dev-only escape hatch. nats-server and PostgREST are pinned versions,
+# checked against SHA-256 hashes written into this script.
 # Re-running upgrades in place (stop guppi-hub first); the previous tree is
 # kept until the new hub passes a start-and-answer check, and a failed
 # upgrade rolls back.
@@ -62,6 +65,28 @@ set -Eeuo pipefail
 fail() { echo ""; echo "✗ $*" >&2; exit 1; }
 trap 'echo ""; echo "✗ Install failed at line $LINENO (see the message above)." >&2;
       echo "  Re-running the installer is safe — it picks up where it left off." >&2' ERR
+
+sha256_of() { { sha256sum "$1" 2>/dev/null || shasum -a 256 "$1"; } | cut -d' ' -f1; }
+
+# Verify a downloaded release asset ($1, published as $2) against the release's
+# SHA256SUMS ($3). Fails CLOSED: no sums file, or no line for the asset, is a
+# refusal, not a skip — root is about to run what's inside. GUPPI_SKIP_VERIFY=1
+# is the escape hatch for dev builds, and says so loudly.
+check_sum() {
+  local file="$1" name="$2" sums="$3" want
+  if [ "${GUPPI_SKIP_VERIFY:-0}" = 1 ]; then
+    echo "   WARNING: GUPPI_SKIP_VERIFY=1 — $name is NOT being verified. Dev builds only." >&2
+    return 0
+  fi
+  [ -s "$sums" ] || fail "No SHA256SUMS on release ${GUPPI_REF:-?} to verify $name against — refusing to install unverified code.
+  (Dev builds only: GUPPI_SKIP_VERIFY=1 skips this check.)"
+  want=$(awk -v n="$name" '$2 == n || $2 == "*" n { print $1; exit }' "$sums")
+  [ -n "$want" ] || fail "$name isn't listed in ${GUPPI_REF:-?}'s SHA256SUMS — refusing to install unverified code.
+  (Dev builds only: GUPPI_SKIP_VERIFY=1 skips this check.)"
+  [ "$(sha256_of "$file")" = "$want" ] \
+    || fail "$name failed checksum verification against ${GUPPI_REF:-?}'s SHA256SUMS"
+  echo "   $name: checksum OK"
+}
 
 # ── CLI only ────────────────────────────────────────────────────────────────
 # `curl ... | bash -s -- cli` puts just the `guppi` command on a laptop or any
@@ -106,14 +131,11 @@ if [ "${1:-}" = cli ]; then
     DL="https://github.com/$REPO/releases/download/$GUPPI_REF"
     fetch -o "$TMPD/guppi-src.tar.gz" "$DL/guppi-src.tar.gz" \
       || fail "No guppi-src.tar.gz asset on release $GUPPI_REF"
-    if fetch -o "$TMPD/SHA256SUMS" "$DL/SHA256SUMS" 2>/dev/null; then
-      want=$(grep " guppi-src.tar.gz\$" "$TMPD/SHA256SUMS" | cut -d' ' -f1 || true)
-      got=$( (sha256sum "$TMPD/guppi-src.tar.gz" 2>/dev/null || shasum -a 256 "$TMPD/guppi-src.tar.gz") | cut -d' ' -f1)
-      [ -z "$want" ] || [ "$want" = "$got" ] || fail "guppi-src.tar.gz failed checksum verification against $GUPPI_REF's SHA256SUMS"
-    fi
+    fetch -o "$TMPD/SHA256SUMS" "$DL/SHA256SUMS" 2>/dev/null || rm -f "$TMPD/SHA256SUMS"
+    check_sum "$TMPD/guppi-src.tar.gz" guppi-src.tar.gz "$TMPD/SHA256SUMS" >/dev/null
   fi
   mkdir -p "$TMPD/src"
-  tar -xzf "$TMPD/guppi-src.tar.gz" -C "$TMPD/src" --strip-components=1
+  tar -xzf "$TMPD/guppi-src.tar.gz" -C "$TMPD/src" --strip-components=1 --no-same-owner
 
   echo "── Installing the guppi CLI ──"
   "$UV" tool install --force --python 3.12 "$TMPD/src/packages/cli" >/dev/null 2>"$TMPD/uv.log" \
@@ -135,6 +157,18 @@ if [ "${1:-}" = cli ]; then
 fi
 
 [ "$(id -u)" -eq 0 ] || fail "Run as root:  curl ... | sudo bash"
+# `guppi update` hands over secrets in a 0600 file rather than on sudo's
+# command line (readable by every user in /proc/<pid>/cmdline). Take only the
+# names it may carry, export them for this run and the rack installer, delete it.
+if [ -n "${GUPPI_SECRETS_FILE:-}" ]; then
+  while IFS= read -r __line || [ -n "$__line" ]; do
+    case "${__line%%=*}" in
+      NATS_USERNAME|NATS_PASSWORD|DATABASE_URL) export "${__line%%=*}=${__line#*=}" ;;
+    esac
+  done <"$GUPPI_SECRETS_FILE"
+  rm -f "$GUPPI_SECRETS_FILE"
+  unset __line GUPPI_SECRETS_FILE
+fi
 # Resolve our own directory BEFORE `cd /` — when invoked as `bash scripts/install.sh`
 # (dev/CI), BASH_SOURCE is a relative path that only resolves against the original
 # cwd. Doing this after the cd would silently yield an empty SELF_DIR, so the rack
@@ -199,14 +233,27 @@ if [ "$COMPONENT" = rack ]; then
   # re-exec whatever stale copy is already installed (which silently pins the box
   # to its current version). Air-gapped reuse still works via GUPPI_SRC_TARBALL.
   # SELF_DIR was resolved at the top, before `cd /` (see there for why).
+  # Only from a tree root owns: `guppi update` runs this script from the
+  # operator's TMPDIR, whose parent they may own — a planted
+  # ../packages/rack/install.sh there would run as root, unverified.
   for RACK_SH in ${SELF_DIR:+"$SELF_DIR/../packages/rack/install.sh"}; do
-    if [ -f "$RACK_SH" ]; then exec bash "$RACK_SH" "$@"; fi
+    [ -f "$RACK_SH" ] || continue
+    owner_of() { stat -c %u "$1" 2>/dev/null || stat -f %u "$1"; }
+    if [ -n "${GUPPI_DEV_TREE:-}" ] \
+       || { [ "$(owner_of "$SELF_DIR/..")" = 0 ] && [ "$(owner_of "$RACK_SH")" = 0 ]; }; then
+      exec bash "$RACK_SH" "$@"
+    fi
+    echo "   Ignoring $RACK_SH: not root-owned (GUPPI_DEV_TREE=1 runs a checkout's own rack installer)." >&2
   done
   if [ "${1:-}" = "--uninstall" ]; then
     fail "no rack install found on this box — nothing to uninstall."
   fi
   echo "── Fetching guppi source (rack component, ${GUPPI_REF:-latest release}) ──"
+  # Root-owned, private (mktemp -d is 0700): the tarball is verified and the
+  # rack installer runs from HERE, never from the operator-owned tree under
+  # $GUPPI_HOME/src, which the operator could swap between extract and exec.
   TMPD=$(mktemp -d /tmp/guppi-install.XXXXXX)
+  trap 'rm -rf "$TMPD"' EXIT
   # --speed-limit/--speed-time abort a stalled transfer so --retry restarts it;
   # --connect-timeout alone bounds only the handshake (see the main fetch()).
   fetch() {
@@ -220,16 +267,30 @@ if [ "$COMPONENT" = rack ]; then
       # Response into a variable FIRST (see latest_tag below for why no pipe).
       JSON=$(fetch "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null || true)
       GUPPI_REF=$(grep -m1 '"tag_name"' <<<"$JSON" | cut -d'"' -f4 || true)
-      [ -n "$GUPPI_REF" ] || { rm -rf "$TMPD"; fail "No public release found on $REPO — set GUPPI_REF to a tag."; }
+      [ -n "$GUPPI_REF" ] || fail "No public release found on $REPO — set GUPPI_REF to a tag."
     fi
     fetch -o "$TMPD/guppi-src.tar.gz" \
       "https://github.com/$REPO/releases/download/$GUPPI_REF/guppi-src.tar.gz" \
-      || { rm -rf "$TMPD"; fail "No guppi-src.tar.gz asset on release $GUPPI_REF"; }
+      || fail "No guppi-src.tar.gz asset on release $GUPPI_REF"
+    fetch -o "$TMPD/SHA256SUMS" \
+      "https://github.com/$REPO/releases/download/$GUPPI_REF/SHA256SUMS" 2>/dev/null \
+      || rm -f "$TMPD/SHA256SUMS"
+    check_sum "$TMPD/guppi-src.tar.gz" guppi-src.tar.gz "$TMPD/SHA256SUMS"
   fi
-  mkdir -p "$GUPPI_HOME/src"
-  tar -xzf "$TMPD/guppi-src.tar.gz" -C "$GUPPI_HOME/src" --strip-components=1
-  rm -rf "$TMPD"   # exec replaces this process, so clean up before handing over
-  exec bash "$GUPPI_HOME/src/packages/rack/install.sh" "$@"
+  mkdir -p "$TMPD/src"
+  tar -xzf "$TMPD/guppi-src.tar.gz" -C "$TMPD/src" --strip-components=1 --no-same-owner
+  # Lay the tree down AS the operator, who owns it (and the rack venv in it):
+  # root never writes through anything they may have planted there.
+  if [ ! -d "$GUPPI_HOME/src" ]; then
+    install -d -m 0755 -o root -g 0 "$GUPPI_HOME"
+    install -d -m 0755 -o "$RUN_USER" -g "$(id -g "$RUN_USER")" "$GUPPI_HOME/src"
+  fi
+  chown -R "$RUN_USER:" "$GUPPI_HOME/src"   # -R never follows symlinks
+  # shellcheck disable=SC2024  # on purpose: root reads the verified tarball, the operator writes
+  sudo -u "$RUN_USER" tar -xzf - -C "$GUPPI_HOME/src" --strip-components=1 <"$TMPD/guppi-src.tar.gz"
+  rc=0
+  GUPPI_RACK_DIR="$GUPPI_HOME/src/packages/rack" bash "$TMPD/src/packages/rack/install.sh" "$@" || rc=$?
+  exit "$rc"
 fi
 
 # ── Rack-too (the default) ──────────────────────────────────────────────────
@@ -299,11 +360,13 @@ command -v apt-get >/dev/null 2>&1 \
 
 ARCH=$(uname -m)
 case "$ARCH" in
-  # PostgREST renamed its arm64 asset in v16.0 (ubuntu-aarch64 →
-  # linux-static-aarch64); older releases (incl. the pinned fallback) only
-  # have the old name, so list both and try in order.
-  aarch64|arm64) PGRST_ARCHES="linux-static-aarch64 ubuntu-aarch64"; NATS_ARCH="arm64" ;;
-  x86_64)        PGRST_ARCHES="linux-static-x86-64"; NATS_ARCH="amd64" ;;
+  # Pinned versions + SHA-256 per arch (see NATS_VERSION/POSTGREST_VERSION).
+  aarch64|arm64) PGRST_ARCH="linux-static-aarch64"; NATS_ARCH="arm64"
+                 NATS_SHA256=bc2c788dcbf2849af749564e06a0d48c19bced851f2d68a2e21c54d078949b28
+                 PGRST_SHA256=96d75a34c7c095d5f97b87f88042f898192724350861328db9e1509e696ea057 ;;
+  x86_64)        PGRST_ARCH="linux-static-x86-64"; NATS_ARCH="amd64"
+                 NATS_SHA256=67cb8e10bc6f0c4b47f75a728529a20953dbae2a4f9a4a52ae8517d65ae303ff
+                 PGRST_SHA256=5099e7ada38f9f6846cd87c14c5f158b7c165f1e9959665ad412e61f4dceba95 ;;
   armv7l|armv6l)
     fail "32-bit OS detected ($ARCH). Guppi needs a 64-bit OS — on a Pi 4/5, flash the 64-bit Raspberry Pi OS image." ;;
   *) fail "Unsupported architecture: $ARCH (need arm64 or amd64)" ;;
@@ -323,7 +386,8 @@ DISK_MB=$(df -Pm /opt 2>/dev/null | awk 'NR==2{print $4}' || echo 99999)
 
 # One installer at a time — two concurrent runs interleave apt, chown, and
 # file swaps into a mess.
-exec 9>/var/lock/guppi-install.lock
+# /run, not /var/lock (/run/lock is world-writable: anyone could pre-create it).
+exec 9>/run/guppi-install.lock
 flock -n 9 || fail "Another guppi installer is already running."
 
 # Downloads land in a private temp dir (no fixed /tmp names — no collisions,
@@ -366,19 +430,16 @@ latest_tag() {
   echo "$tag"
 }
 
-# Verify a downloaded release asset against the release's SHA256SUMS (present
-# on releases cut after checksums landed; older releases skip with a note).
-verify_asset() {
-  local name="$1"
-  [ -f "$TMPD/SHA256SUMS" ] || return 0
-  if ! grep -q " $name\$" "$TMPD/SHA256SUMS"; then
-    echo "   NOTE: $name not in SHA256SUMS — skipping verification"
-    return 0
-  fi
-  (cd "$TMPD" && grep " $name\$" SHA256SUMS | sha256sum -c - >/dev/null) \
-    || fail "$name failed checksum verification against $GUPPI_REF's SHA256SUMS"
-  echo "   $name: checksum OK"
-}
+# Verify a downloaded release asset against the release's SHA256SUMS. Fails
+# closed (check_sum, at the top): a release without one is refused.
+verify_asset() { check_sum "$TMPD/$1" "$1" "$TMPD/SHA256SUMS"; }
+
+# The broker and the read layer are pinned, not "latest": root installs them
+# into /usr/local/bin, so each is checked against a hash written here (nats'
+# published SHA256SUMS and GitHub's asset digest for PostgREST, both matched
+# against the downloaded files). Bump a version and its two hashes together.
+NATS_VERSION=v2.15.2
+POSTGREST_VERSION=v16.5
 
 # Fetch every release asset we need into $TMPD, ready for the foreground steps
 # to verify + extract. Launched as a BACKGROUND job in [1/7] so the (network-
@@ -392,7 +453,7 @@ stage_downloads() {
   if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
     cp "$GUPPI_SRC_TARBALL" "$TMPD/guppi-src.tar.gz"
   else
-    fetch -o "$TMPD/SHA256SUMS" "$DL/SHA256SUMS" 2>/dev/null || true
+    fetch -o "$TMPD/SHA256SUMS" "$DL/SHA256SUMS" 2>/dev/null || rm -f "$TMPD/SHA256SUMS"
     fetch -o "$TMPD/guppi-src.tar.gz" "$DL/guppi-src.tar.gz" \
       || fail "No guppi-src.tar.gz asset on release $GUPPI_REF"
     # UI bundle is best-effort (the hub can run API-only). A local override is
@@ -405,23 +466,28 @@ stage_downloads() {
   # Broker + read-layer binaries (from their own repos, so staged even for an
   # air-gapped src tarball) — only if not already on PATH. [5/7] extracts these.
   if ! command -v nats-server >/dev/null 2>&1; then
-    local nats_ver
-    nats_ver=$(latest_tag nats-io/nats-server v2.14.3)
     fetch -o "$TMPD/nats.tar.gz" \
-      "https://github.com/nats-io/nats-server/releases/download/$nats_ver/nats-server-$nats_ver-linux-$NATS_ARCH.tar.gz" \
-      || fail "Couldn't download nats-server $nats_ver"
+      "https://github.com/nats-io/nats-server/releases/download/$NATS_VERSION/nats-server-$NATS_VERSION-linux-$NATS_ARCH.tar.gz" \
+      || fail "Couldn't download nats-server $NATS_VERSION"
   fi
   if ! command -v postgrest >/dev/null 2>&1; then
-    local pgrst_ver ok="" arch
-    pgrst_ver=$(latest_tag PostgREST/postgrest v14.15)
-    for arch in $PGRST_ARCHES; do
-      if fetch -o "$TMPD/postgrest.tar.xz" \
-        "https://github.com/PostgREST/postgrest/releases/download/$pgrst_ver/postgrest-$pgrst_ver-$arch.tar.xz"; then
-        ok=1; break
-      fi
-    done
-    [ -n "$ok" ] || fail "Couldn't download PostgREST $pgrst_ver (tried: $PGRST_ARCHES)"
+    fetch -o "$TMPD/postgrest.tar.xz" \
+      "https://github.com/PostgREST/postgrest/releases/download/$POSTGREST_VERSION/postgrest-$POSTGREST_VERSION-$PGRST_ARCH.tar.xz" \
+      || fail "Couldn't download PostgREST $POSTGREST_VERSION ($PGRST_ARCH)"
   fi
+}
+
+# Hand over to the rack installer. It runs from a copy unpacked out of the
+# VERIFIED tarball into our private $TMPD — never from $GUPPI_HOME/src, which
+# the operator owns and could swap before root runs it — and installs the rack
+# into that tree (GUPPI_RACK_DIR). Not exec: the EXIT trap still cleans $TMPD.
+run_rack_installer() {
+  local rc=0
+  mkdir -p "$TMPD/rack-src"
+  tar -xzf "$TMPD/guppi-src.tar.gz" -C "$TMPD/rack-src" --strip-components=1 --no-same-owner
+  GUPPI_RACK_DIR="$GUPPI_HOME/src/packages/rack" \
+    bash "$TMPD/rack-src/packages/rack/install.sh" || rc=$?
+  exit "$rc"
 }
 
 # Whether something is already answering on the hub port. -m bounds the probe:
@@ -617,6 +683,11 @@ PSQL="sudo -u postgres psql -p $PG_PORT"
 echo "── [2/7] Directories ──"
 mkdir -p "$GUPPI_HOME" "$GUPPI_DATA/artifacts" "$GUPPI_ETC"
 chown -R "$RUN_USER:" "$GUPPI_DATA"
+# /opt/guppi itself stays ROOT's (older installs handed it to the operator):
+# root renames, extracts and deletes trees in it below, and an operator-owned
+# parent would let anything running as them plant a symlink in the way.
+# The trees inside it (src, ui) are theirs.
+chown root:root "$GUPPI_HOME"; chmod 755 "$GUPPI_HOME"
 
 echo "── [3/7] Fetch guppi source (${GUPPI_REF:-latest release}) ──"
 # Everything installs from PUBLIC release assets on github.com/$REPO — no
@@ -629,8 +700,6 @@ if [ -n "${GUPPI_SRC_TARBALL:-}" ]; then
   echo "   using local tarball: $GUPPI_SRC_TARBALL"
 else
   echo "   ref: $GUPPI_REF"
-  [ -f "$TMPD/SHA256SUMS" ] \
-    || echo "   NOTE: no SHA256SUMS on $GUPPI_REF (pre-checksum release) — skipping verification"
   verify_asset guppi-src.tar.gz
 fi
 
@@ -673,7 +742,7 @@ if [ -d "$GUPPI_HOME/src" ]; then
   fi
 fi
 mkdir -p "$GUPPI_HOME/src"
-tar -xzf "$TMPD/guppi-src.tar.gz" -C "$GUPPI_HOME/src" --strip-components=1
+tar -xzf "$TMPD/guppi-src.tar.gz" -C "$GUPPI_HOME/src" --strip-components=1 --no-same-owner
 
 # ── venv reuse across upgrades ──────────────────────────────────────────────
 # The tree rotate above destroys every venv, yet most releases change only the
@@ -725,11 +794,11 @@ fi
 echo "── [4/7] Prebuilt UI bundle ──"
 rm -rf "$GUPPI_HOME/ui"; mkdir -p "$GUPPI_HOME/ui"
 if [ -n "${GUPPI_UI_TARBALL:-}" ]; then
-  tar -xzf "$GUPPI_UI_TARBALL" -C "$GUPPI_HOME/ui"
+  tar -xzf "$GUPPI_UI_TARBALL" -C "$GUPPI_HOME/ui" --no-same-owner
   echo "   installed from local tarball"
 elif [ -f "$TMPD/guppi-ui-local.tar.gz" ]; then
   verify_asset guppi-ui-local.tar.gz
-  tar -xzf "$TMPD/guppi-ui-local.tar.gz" -C "$GUPPI_HOME/ui"
+  tar -xzf "$TMPD/guppi-ui-local.tar.gz" -C "$GUPPI_HOME/ui" --no-same-owner
   echo "   installed from release asset"
 else
   echo "   WARNING: no UI bundle — hub runs API-only. Build the bundle on a"
@@ -743,11 +812,15 @@ echo "── [5/7] nats-server + PostgREST binaries ──"
 # binary means nothing was staged and nothing is done.
 if ! command -v nats-server >/dev/null 2>&1; then
   [ -f "$TMPD/nats.tar.gz" ] || fail "nats-server wasn't staged — re-run the installer."
-  tar -xzf "$TMPD/nats.tar.gz" -C "$TMPD"
+  [ "$(sha256_of "$TMPD/nats.tar.gz")" = "$NATS_SHA256" ] \
+    || fail "nats-server $NATS_VERSION failed its pinned SHA-256 check — not installing it."
+  tar -xzf "$TMPD/nats.tar.gz" -C "$TMPD" --no-same-owner
   install -m755 "$TMPD"/nats-server-*/nats-server /usr/local/bin/nats-server
 fi
 if ! command -v postgrest >/dev/null 2>&1; then
   [ -f "$TMPD/postgrest.tar.xz" ] || fail "PostgREST wasn't staged — re-run the installer."
+  [ "$(sha256_of "$TMPD/postgrest.tar.xz")" = "$PGRST_SHA256" ] \
+    || fail "PostgREST $POSTGREST_VERSION failed its pinned SHA-256 check — not installing it."
   tar -xJf "$TMPD/postgrest.tar.xz" -C /usr/local/bin postgrest
 fi
 
@@ -781,7 +854,8 @@ fi
 systemctl reload postgresql
 
 command -v uv >/dev/null 2>&1 \
-  || { fetch https://astral.sh/uv/install.sh -o "$TMPD/uv-install.sh" \
+  || { fetch https://astral.sh/uv/0.13.6/install.sh -o "$TMPD/uv-install.sh" \
+       && [ "$(sha256_of "$TMPD/uv-install.sh")" = f7a56e7afaec49a3bcbc3ac3cdbe917e7c6ce30e0d815308a12e531aa5ef23b7 ] \
        && env UV_INSTALL_DIR=/usr/local/bin sh "$TMPD/uv-install.sh" >/dev/null; } \
   || fail "Couldn't install uv"
 
@@ -843,12 +917,14 @@ build_venv() {  # $1=dir  $2=verify-cmd (run in $dir as $RUN_USER)  $3=label
   fi
   # Stamp the verified venv so the next upgrade can reuse it when the
   # dependency set is unchanged (see the reuse block after extraction).
-  echo "$stamp" > "$dir/.venv/.guppi-sync-stamp"
-  chown "$RUN_USER:" "$dir/.venv/.guppi-sync-stamp"
+  # Written AS $RUN_USER: the venv is theirs, and a root write would follow
+  # anything planted at that path.
+  echo "$stamp" | sudo -u "$RUN_USER" tee "$dir/.venv/.guppi-sync-stamp" >/dev/null
 }
 # The tarball was extracted as root; uv sync (and the .venv it creates) run as
-# $RUN_USER, so the tree must be theirs before syncing.
-chown -R "$RUN_USER:" "$GUPPI_HOME"
+# $RUN_USER, so the tree must be theirs before syncing. (Not $GUPPI_HOME
+# itself — see [2/7]. -R never follows symlinks.)
+chown -R "$RUN_USER:" "$GUPPI_HOME/src" "$GUPPI_HOME/ui"
 build_venv "$GUPPI_HOME/src/packages/agent" \
   '.venv/bin/python -c "import fastapi, uvicorn, asyncpg"' "hub/agent"
 
@@ -1058,7 +1134,7 @@ if [ "$RACK_NEXT" = 1 ]; then
   fi
   echo "  Hub-only box? Re-run the installer with --no-rack."
   echo ""
-  exec bash "$GUPPI_HOME/src/packages/rack/install.sh"
+  run_rack_installer
 fi
 
 if [ "$UPGRADING" = 1 ] && [ -x /usr/local/bin/guppi-rack ]; then
@@ -1075,6 +1151,6 @@ if [ "$UPGRADING" = 1 ] && [ -x /usr/local/bin/guppi-rack ]; then
     # in the tree we just verified; it inherits SUDO_USER so the run user matches.
     echo "  NOTE: the tree was replaced — rebuilding the rack against it now…"
     echo ""
-    exec bash "$GUPPI_HOME/src/packages/rack/install.sh"
+    run_rack_installer
   fi
 fi

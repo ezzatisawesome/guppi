@@ -579,6 +579,27 @@ Cross-check which is which with `lsusb` (the ITECH is USB vendor `2ec7`); the
 device reports no serial string — fall back to `/dev/serial/by-path/` (stable
 per physical USB port; don't move the cable between ports).
 
+**macOS and Windows have no `/dev/serial/by-id/`**: `cu.usbmodem<N>` and
+`COM<N>` follow the USB socket, so a replug can swap two boards. Name the
+board by its USB serial number instead, with pyserial's `hwgrep://` form:
+
+```yaml
+- id: bms1
+  type: MojaveBMS
+  port: hwgrep://SER=E6614103E7
+```
+
+The rack resolves it to the port that board is on each time it builds the
+device, and the bus scan leaves that board alone wherever it is plugged.
+`python -m serial.tools.list_ports -v` shows each port's `SER=` (the
+devices scan shows it as `sn …`). A board with two serial ports under one serial number
+takes `&n=0` or `&n=1` (in port-name order); any other `hwgrep://` text is
+a regular expression over the port's name, description and hardware id. A
+board replugged into another socket while the rack runs is followed: within
+about a second the rack rebuilds that device from its config where the board
+now is (two boards swapped between sockets each get their own). A device a
+running test is using is rebuilt when the run ends.
+
 The rack guards this: any `/dev/...` port a driver-owned device opens is
 claimed before `connect()`, so two devices resolving to the *same* node fail
 fast with an actionable "already in use" message instead of fighting over it.

@@ -247,6 +247,7 @@ later, the rack de-energizes the rig itself.
 guppi ls [prefix]           guppi cat <path>
 guppi put <local|-> [path]  guppi rm <path>
 guppi pull [dir]            guppi push [dir] [--check]
+guppi preview <file|-|path>
 ```
 
 Dashboards (`dashboards/*.json`) and data views (`data-views/*.json`) are
@@ -259,6 +260,12 @@ load the new version. On a local
 bench these are the rig's workspace (`pull`/`push` also sync `tests/`); in
 the cloud, an org's workspace — the org your rig belongs to (so the team
 sees it), or `--org` to pick one; your personal org only when that's unclear.
+
+`preview` draws a dashboard's layout as text, from a local file with no hub
+needed (or a workspace path): every block a box at its grid cell and span,
+placed the way the app places it, with a panel's title on its border and one
+line per graph, readout, toggle or setpoint inside. A box ending in `+N more`
+is too small for its contents. It shows layout only, not colours or plots.
 
 `push --check` (or `put <file> --check` for one file) checks pages without
 uploading anything: the JSON shape and every signal

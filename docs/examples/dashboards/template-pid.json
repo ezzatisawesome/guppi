@@ -1,0 +1,59 @@
+{
+  "kind": "dashboard",
+  "id": "<id>",
+  "title": "<Title>",
+  "root": { "id": "root", "type": "canvas", "children": [
+    { "id": "power", "type": "panel", "title": "Station power", "col": 0, "row": 0, "colSpan": 12, "rowSpan": 6, "children": [
+      { "id": "power-canvas", "type": "canvas", "children": [
+        {"id": "gen1", "type": "equipment", "tag": "G", "role": "source", "label": "GEN 1", "read": "<gen 1 running>"},
+        {"id": "gen2", "type": "equipment", "tag": "G", "role": "source", "label": "GEN 2", "read": "<gen 2 running>"},
+        {"id": "cbg1", "type": "breaker", "label": "CB-G1", "read": "<gen 1 breaker closed>", "write": "<set gen 1 breaker>", "alarm": "<gen 1 breaker tripped>"},
+        {"id": "cbg2", "type": "breaker", "label": "CB-G2", "read": "<gen 2 breaker closed>", "write": "<set gen 2 breaker>", "alarm": "<gen 2 breaker tripped>"},
+        {"id": "busa", "type": "header", "label": "BUS A", "read": "<bus a voltage>"},
+        {"id": "cb1", "type": "breaker", "label": "CB-1", "read": "<feeder 1 closed>", "write": "<set feeder 1>"},
+        {"id": "cb2", "type": "breaker", "label": "CB-2", "read": "<feeder 2 closed>", "write": "<set feeder 2>"},
+        {"id": "cb3", "type": "breaker", "label": "CB-3", "read": "<feeder 3 closed>", "write": "<set feeder 3>"},
+        {"id": "cb4", "type": "breaker", "label": "CB-4", "read": "<feeder 4 closed>", "write": "<set feeder 4>"},
+        {"id": "pmp", "type": "equipment", "tag": "PMP", "shape": "box", "label": "Coolant pump"},
+        {"id": "htr", "type": "equipment", "tag": "HTR", "shape": "box", "label": "Heater 2", "read": "<heater current>", "warnMax": 35, "limitMax": 40},
+        {"id": "fan", "type": "equipment", "tag": "FAN", "label": "Vent fan 3"},
+        {"id": "ctrl", "type": "equipment", "tag": "CTRL", "shape": "box", "label": "Control cabinet"},
+        {"id": "e1", "type": "connector", "from": "gen1", "to": "cbg1"},
+        {"id": "e2", "type": "connector", "from": "gen2", "to": "cbg2"},
+        {"id": "e3", "type": "connector", "from": "cbg1", "to": "busa"},
+        {"id": "e4", "type": "connector", "from": "cbg2", "to": "busa"},
+        {"id": "e5", "type": "connector", "from": "busa", "to": "cb1"},
+        {"id": "e6", "type": "connector", "from": "busa", "to": "cb2"},
+        {"id": "e7", "type": "connector", "from": "busa", "to": "cb3"},
+        {"id": "e8", "type": "connector", "from": "busa", "to": "cb4"},
+        {"id": "e9", "type": "connector", "from": "cb1", "to": "pmp"},
+        {"id": "e10", "type": "connector", "from": "cb2", "to": "htr"},
+        {"id": "e11", "type": "connector", "from": "cb3", "to": "fan"},
+        {"id": "e12", "type": "connector", "from": "cb4", "to": "ctrl"}
+      ]}
+    ]},
+    { "id": "loop", "type": "panel", "title": "Coolant loop", "col": 0, "row": 6, "colSpan": 12, "rowSpan": 6, "children": [
+      { "id": "loop-canvas", "type": "canvas", "children": [
+        {"id": "t1", "type": "tank", "label": "T-1", "read": "<tank level>", "rowSpan": 3},
+        {"id": "p1", "type": "pump", "label": "P-1", "read": "<pump running>", "write": "<set pump>"},
+        {"id": "hdr", "type": "header", "label": "SUPPLY HEADER"},
+        {"id": "pt4", "type": "instrument", "tag": "PI", "label": "PT-4", "read": "<header pressure>", "warnMax": 8, "limitMax": 10},
+        {"id": "xv1", "type": "valve", "label": "XV-1", "read": "<valve 1 open>", "write": "<set valve 1>"},
+        {"id": "xv2", "type": "valve", "label": "XV-2", "read": "<valve 2 open>", "write": "<set valve 2>"},
+        {"id": "xv3", "type": "valve", "label": "XV-3", "read": "<valve 3 open>", "write": "<set valve 3>"},
+        {"id": "hx1", "type": "equipment", "tag": "HX", "shape": "box", "label": "Cold plate A"},
+        {"id": "hx2", "type": "equipment", "tag": "HX", "shape": "box", "label": "Cold plate B"},
+        {"id": "hx3", "type": "equipment", "tag": "HX", "shape": "box", "label": "Cold plate C"},
+        {"id": "f1", "type": "connector", "from": "t1", "to": "p1"},
+        {"id": "f2", "type": "connector", "from": "p1", "to": "hdr"},
+        {"id": "f3", "type": "connector", "from": "hdr", "to": "pt4"},
+        {"id": "f4", "type": "connector", "from": "hdr", "to": "xv1"},
+        {"id": "f5", "type": "connector", "from": "hdr", "to": "xv2"},
+        {"id": "f6", "type": "connector", "from": "hdr", "to": "xv3"},
+        {"id": "f7", "type": "connector", "from": "xv1", "to": "hx1"},
+        {"id": "f8", "type": "connector", "from": "xv2", "to": "hx2"},
+        {"id": "f9", "type": "connector", "from": "xv3", "to": "hx3"}
+      ]}
+    ]}
+  ]}
+}

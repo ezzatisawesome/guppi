@@ -1,0 +1,205 @@
+{
+  "kind": "dashboard",
+  "id": "dut-channels",
+  "title": "<DUT> channels",
+  "root": {
+    "id": "root",
+    "type": "canvas",
+    "children": [
+      {
+        "id": "a-plot-panel",
+        "type": "panel",
+        "title": "<Channel A>",
+        "col": 0,
+        "row": 0,
+        "colSpan": 8,
+        "rowSpan": 4,
+        "children": [
+          {
+            "id": "a-plot",
+            "type": "waveform",
+            "read": "<dut>.<a voltage>",
+            "reads": [
+              "<dut>.<a current>"
+            ],
+            "window": 60,
+            "traces": {
+              "<dut>.<a voltage>": {
+                "color": "#2563eb"
+              },
+              "<dut>.<a current>": {
+                "color": "#d97706"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "a-controls",
+        "type": "panel",
+        "title": "<Channel A> controls",
+        "col": 8,
+        "row": 0,
+        "colSpan": 4,
+        "rowSpan": 4,
+        "children": [
+          {
+            "id": "a-readouts",
+            "type": "row",
+            "children": [
+              {
+                "id": "a-v",
+                "type": "readout",
+                "read": "<dut>.<a voltage>",
+                "label": "Voltage",
+                "size": "lg",
+                "accent": "#2563eb"
+              },
+              {
+                "id": "a-i",
+                "type": "readout",
+                "read": "<dut>.<a current>",
+                "label": "Current",
+                "size": "md",
+                "accent": "#d97706"
+              }
+            ]
+          },
+          {
+            "id": "a-toggles",
+            "type": "row",
+            "children": [
+              {
+                "id": "a-enable",
+                "type": "toggle",
+                "read": "<dut>.<a enable>",
+                "write": "<dut>.<set a enable>",
+                "label": "<Enable>"
+              },
+              {
+                "id": "a-mode",
+                "type": "toggle",
+                "read": "<dut>.<a mode>",
+                "write": "<dut>.<set a mode>",
+                "label": "<Mode>"
+              }
+            ]
+          },
+          {
+            "id": "a-set",
+            "type": "setpoint",
+            "read": "<dut>.<a setpoint>",
+            "write": "<dut>.<set a setpoint>",
+            "label": "<Main setpoint>",
+            "variant": "stepper"
+          },
+          {
+            "id": "a-trim",
+            "type": "setpoint",
+            "read": "<dut>.<a trim>",
+            "write": "<dut>.<set a trim>",
+            "label": "<Second setpoint>",
+            "variant": "stepper"
+          }
+        ]
+      },
+      {
+        "id": "b-plot-panel",
+        "type": "panel",
+        "title": "<Channel B>",
+        "col": 0,
+        "row": 4,
+        "colSpan": 8,
+        "rowSpan": 4,
+        "children": [
+          {
+            "id": "b-plot",
+            "type": "waveform",
+            "read": "<dut>.<b voltage>",
+            "reads": [
+              "<dut>.<b current>"
+            ],
+            "window": 60,
+            "traces": {
+              "<dut>.<b voltage>": {
+                "color": "#16a34a"
+              },
+              "<dut>.<b current>": {
+                "color": "#7c3aed"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "b-controls",
+        "type": "panel",
+        "title": "<Channel B> controls",
+        "col": 8,
+        "row": 4,
+        "colSpan": 4,
+        "rowSpan": 4,
+        "children": [
+          {
+            "id": "b-readouts",
+            "type": "row",
+            "children": [
+              {
+                "id": "b-v",
+                "type": "readout",
+                "read": "<dut>.<b voltage>",
+                "label": "Voltage",
+                "size": "lg",
+                "accent": "#16a34a"
+              },
+              {
+                "id": "b-i",
+                "type": "readout",
+                "read": "<dut>.<b current>",
+                "label": "Current",
+                "size": "md",
+                "accent": "#7c3aed"
+              }
+            ]
+          },
+          {
+            "id": "b-toggles",
+            "type": "row",
+            "children": [
+              {
+                "id": "b-enable",
+                "type": "toggle",
+                "read": "<dut>.<b enable>",
+                "write": "<dut>.<set b enable>",
+                "label": "<Enable>"
+              },
+              {
+                "id": "b-mode",
+                "type": "toggle",
+                "read": "<dut>.<b mode>",
+                "write": "<dut>.<set b mode>",
+                "label": "<Mode>"
+              }
+            ]
+          },
+          {
+            "id": "b-set",
+            "type": "setpoint",
+            "read": "<dut>.<b setpoint>",
+            "write": "<dut>.<set b setpoint>",
+            "label": "<Main setpoint>",
+            "variant": "stepper"
+          },
+          {
+            "id": "b-trim",
+            "type": "setpoint",
+            "read": "<dut>.<b trim>",
+            "write": "<dut>.<set b trim>",
+            "label": "<Second setpoint>",
+            "variant": "stepper"
+          }
+        ]
+      }
+    ]
+  }
+}
