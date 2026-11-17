@@ -100,11 +100,13 @@ guppi query psu1.1.voltage system.log --run 69958239   # readings and log over t
 ## Timeline
 
 A run is a window over the history. There is one place a run is shown: the
-**Runs panel**, on the data view. Its home is the list of every run, with
-click a run to open it in place (verdict, facts, phases,
-log) and **‹ Runs** goes back. A live run shows by itself. Double-click a run
-to park every lane of the data view on its window (*Show in the data view* in
-the run's ⋯ menu does the same). The link above does both for
-anyone. From there, the data view is the
-place to see what every instrument did, with the log as a track under the
-traces. [Dashboards & data views](dashboards.md) covers the rest.
+**Runs panel**. On a data view it is always there, its home the list of every
+run: click a run to open it in place (verdict, facts, phases, log) and
+**‹ Runs** goes back. A live run shows by itself. Double-click a run to park
+every lane of the data view on its window (*Show in the data view* in the
+run's ⋯ menu does the same). On any other page the panel comes up when a run
+is asked for (the link above, the header's run pill, a prompt's Answer) and
+shows exactly that run; close it when you're done. Open the link with a data
+view (from Projects) to see what every instrument did, with the log as a
+track under the traces. [Dashboards & data views](dashboards.md) covers the
+rest.

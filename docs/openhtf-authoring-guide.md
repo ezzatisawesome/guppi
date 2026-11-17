@@ -138,7 +138,7 @@ shared across phases and runs.
 | `plugs.PSU1`, `plugs.LOAD1`, … | — | the plug for each rig device, by its config id |
 | `sleep` | `(seconds) -> None` | `time.sleep` that a stop interrupts at once. Use it for every settle and soak: a plain `time.sleep(60)` holds a stop for the full minute, because OpenHTF can only interrupt a phase between Python bytecodes |
 | `capture_artifact` | `(path, waveform, phase=None) -> ref` | publish a **uniform numeric series** by reference (a scope trace, or one metric of a sweep), stamped with the run's `execution_id`. `waveform` must be `{"v": [floats], "sample_rate": float, "t0"?: float, "unit"?: str}`; **only `v` is stored** (compact f32) and the axis is rebuilt from `(t0, sample_rate, n)`. Any dict lacking `"v"` raises `KeyError`. Raises if no artifact store is configured. |
-| `safe_shutdown` | `(only=None) -> None` | de-energize every output on the rig, or only those under `only`: a device id or plug, an output path (`"psu3.2"`), a list of them, or `"run"` for the devices the script bound. Use it in a phase's `finally`. Every output is tried; if one did not turn off it raises `DeEnergizeError` naming it, the run ends in error, the rig latches a safety trip, and the off is sent again when that instrument reconnects. |
+| `safe_shutdown` | `(only=None) -> None` | de-energize every output on the rig (everything else first, then the supplies), or only those under `only`: a device id or plug, an output path (`"psu3.2"`), a list of them, or `"run"` for the devices the script bound. Use it in a phase's `finally`. Every output is tried; if one did not turn off it raises `DeEnergizeError` naming it, the run ends in error, the rig latches a safety trip, and the off is sent again when that instrument reconnects. |
 | `reconnect_now` | `(device, timeout=15.0) -> bool` | ask a device (id or plug) to reconnect now instead of waiting out its retry backoff — call it after powering up the supply it runs from — and wait until it is healthy. False if it isn't back within `timeout`. |
 | `wait_until` | `(path, predicate, timeout=10.0, interval=0.2) -> value` | read the signal at `path` until `predicate(value)` holds and return that value. A failed read asks the device to reconnect now. Raises `TimeoutError` naming the last value. |
 | `arm_guard` | `(path, op, threshold, min_duration=0.0, scope="run") -> ids` | arm a watchdog abort-limit (L1). `scope="run"`: the rack disarms exactly what it armed when the run ends — pass, fail, stop, or timeout (§6). `scope="phase"`: disarmed when the phase that armed it ends. |
@@ -290,7 +290,14 @@ Notes:
   sinking current reads negative — arm one limit per direction (e.g. `>`, `80`
   for source OC and `<=`, `-40` for sink OC).
 - **`safe_shutdown()`** invokes every device's `energizing=True` capability with
-  `{"enabled": False}` — a guaranteed rig-wide de-energize.
+  `{"enabled": False}` — a guaranteed rig-wide de-energize. Everything but the
+  supplies goes off at once, then the supplies, so a DUT's own outputs go off
+  while its supply still powers its bus. The supplies wait at most 0.5 s per
+  output on a device (2 s in all), so a hung instrument can't hold one on. Make it the last line of
+  the phase: read the DUT before it, never after. A DUT call that fails after
+  it raises the driver's own error with a note saying why, and `guppi test
+  check` warns about one. A safety trip doesn't wait: it cuts every output at
+  once.
 
 ---
 
