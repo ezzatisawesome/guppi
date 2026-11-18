@@ -9,96 +9,127 @@
       {
         "id": "main-plot-panel",
         "type": "panel",
-        "title": "<Main signal>",
+        "title": "<What it shows>",
         "col": 0,
         "row": 0,
         "colSpan": 8,
-        "rowSpan": 3,
+        "rowSpan": 6,
         "children": [
           {
             "id": "main-plot",
             "type": "waveform",
             "read": "<device>.<main signal>",
+            "reads": [
+              "<device 2>.<second signal>"
+            ],
             "window": 60,
             "traces": {
               "<device>.<main signal>": {
-                "color": "#2563eb"
+                "name": "<Main signal>"
+              },
+              "<device 2>.<second signal>": {
+                "name": "<Second signal>"
               }
             }
           }
         ]
       },
       {
-        "id": "main",
-        "type": "readout",
-        "read": "<device>.<main signal>",
-        "label": "<Main signal>",
-        "size": "lg",
-        "accent": "#2563eb",
+        "id": "inst",
+        "type": "panel",
+        "title": "<Instrument>",
         "col": 8,
         "row": 0,
         "colSpan": 4,
-        "rowSpan": 3
-      },
-      {
-        "id": "second-plot-panel",
-        "type": "panel",
-        "title": "<Second signal>",
-        "col": 0,
-        "row": 3,
-        "colSpan": 8,
         "rowSpan": 3,
         "children": [
           {
-            "id": "second-plot",
-            "type": "waveform",
-            "read": "<device>.<second signal>",
-            "window": 60,
-            "traces": {
-              "<device>.<second signal>": {
-                "color": "#d97706"
+            "id": "inst-reads",
+            "type": "row",
+            "children": [
+              {
+                "id": "main",
+                "type": "readout",
+                "read": "<device>.<main signal>",
+                "label": "<Main signal>",
+                "size": "lg"
+              },
+              {
+                "id": "aux",
+                "type": "readout",
+                "read": "<device>.<other signal>",
+                "label": "<Other signal>",
+                "size": "md"
               }
-            }
+            ]
+          },
+          {
+            "id": "out",
+            "type": "toggle",
+            "read": "<device>.<output>",
+            "write": "<device>.<set output>",
+            "label": "Output"
+          },
+          {
+            "id": "set",
+            "type": "setpoint",
+            "read": "<device>.<setpoint readback>",
+            "write": "<device>.<set capability>",
+            "label": "<Setpoint>",
+            "variant": "stepper"
           }
         ]
       },
       {
-        "id": "second",
-        "type": "readout",
-        "read": "<device>.<second signal>",
-        "label": "<Second signal>",
-        "size": "lg",
-        "accent": "#d97706",
+        "id": "inst2",
+        "type": "panel",
+        "title": "<Instrument 2>",
         "col": 8,
         "row": 3,
         "colSpan": 4,
-        "rowSpan": 3
+        "rowSpan": 3,
+        "children": [
+          {
+            "id": "second",
+            "type": "readout",
+            "read": "<device 2>.<second signal>",
+            "label": "<Second signal>",
+            "size": "md"
+          },
+          {
+            "id": "in2",
+            "type": "toggle",
+            "read": "<device 2>.<input>",
+            "write": "<device 2>.<set input>",
+            "label": "Input"
+          }
+        ]
       },
       {
-        "id": "controls",
-        "type": "row",
-        "title": "<Instrument>",
+        "id": "slow-panel",
+        "type": "panel",
+        "title": "<Slow signals>",
         "col": 0,
         "row": 6,
         "colSpan": 12,
-        "rowSpan": 2,
+        "rowSpan": 3,
         "children": [
           {
-            "id": "set",
-            "type": "setpoint",
-            "read": "<device>.<main signal>",
-            "write": "<device>.<set capability>",
-            "label": "<Setpoint>",
-            "variant": "stepper",
-            "accent": "#2563eb"
-          },
-          {
-            "id": "on",
-            "type": "toggle",
-            "read": "<device>.<output signal>",
-            "write": "<device>.<set output>",
-            "label": "Output",
-            "accent": "#2563eb"
+            "id": "slow-plot",
+            "type": "waveform",
+            "read": "<device 3>.<signal 1>",
+            "reads": [
+              "<device 3>.<signal 2>"
+            ],
+            "window": 600,
+            "traces": {
+              "<device 3>.<signal 1>": {
+                "name": "<Name 1>"
+              },
+              "<device 3>.<signal 2>": {
+                "name": "<Name 2>"
+              }
+            }
           }
         ]
       }

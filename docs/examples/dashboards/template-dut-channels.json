@@ -37,7 +37,7 @@
       {
         "id": "a-controls",
         "type": "panel",
-        "title": "<Channel A> controls",
+        "title": "<Channel A>",
         "col": 8,
         "row": 0,
         "colSpan": 4,
@@ -134,7 +134,7 @@
       {
         "id": "b-controls",
         "type": "panel",
-        "title": "<Channel B> controls",
+        "title": "<Channel B>",
         "col": 8,
         "row": 4,
         "colSpan": 4,

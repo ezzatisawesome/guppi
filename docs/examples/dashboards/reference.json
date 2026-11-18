@@ -1,166 +1,177 @@
 {
   "kind": "dashboard",
   "id": "bench-reference",
-  "title": "Bench \u2014 reference layout",
+  "title": "Bench — reference layout",
   "root": {
     "id": "root",
     "type": "canvas",
     "children": [
       {
-        "id": "v-plot-panel",
+        "id": "rail-panel",
         "type": "panel",
-        "title": "Rail voltage",
+        "title": "Rail",
         "col": 0,
         "row": 0,
         "colSpan": 8,
-        "rowSpan": 3,
+        "rowSpan": 6,
         "children": [
           {
-            "id": "v-plot",
+            "id": "rail-plot",
             "type": "waveform",
             "read": "psu1.1.voltage",
+            "reads": [
+              "eload1.1.current"
+            ],
             "window": 60,
             "traces": {
               "psu1.1.voltage": {
-                "color": "#2563eb"
+                "name": "Rail voltage"
+              },
+              "eload1.1.current": {
+                "name": "Load current"
               }
             }
           }
         ]
       },
       {
-        "id": "v",
-        "type": "readout",
-        "read": "psu1.1.voltage",
-        "label": "Rail voltage",
-        "size": "lg",
-        "accent": "#2563eb",
+        "id": "supply",
+        "type": "panel",
+        "title": "Supply",
         "col": 8,
         "row": 0,
         "colSpan": 4,
         "rowSpan": 3,
-        "warnMax": 12.6,
-        "limitMax": 13.0
-      },
-      {
-        "id": "i-plot-panel",
-        "type": "panel",
-        "title": "Rail current",
-        "col": 0,
-        "row": 3,
-        "colSpan": 8,
-        "rowSpan": 3,
         "children": [
           {
-            "id": "i-plot",
-            "type": "waveform",
-            "read": "psu1.1.current",
-            "window": 60,
-            "traces": {
-              "psu1.1.current": {
-                "color": "#d97706"
+            "id": "supply-reads",
+            "type": "row",
+            "children": [
+              {
+                "id": "v",
+                "type": "readout",
+                "read": "psu1.1.voltage",
+                "label": "Voltage",
+                "size": "lg",
+                "warnMax": 29,
+                "limitMax": 30
+              },
+              {
+                "id": "i",
+                "type": "readout",
+                "read": "psu1.1.current",
+                "label": "Current",
+                "size": "md"
               }
-            }
-          }
-        ]
-      },
-      {
-        "id": "i",
-        "type": "readout",
-        "read": "psu1.1.current",
-        "label": "Rail current",
-        "size": "lg",
-        "accent": "#d97706",
-        "col": 8,
-        "row": 3,
-        "colSpan": 4,
-        "rowSpan": 3,
-        "warnMax": 4.5,
-        "limitMax": 5.0
-      },
-      {
-        "id": "t-plot-panel",
-        "type": "panel",
-        "title": "Board temperature",
-        "col": 0,
-        "row": 6,
-        "colSpan": 8,
-        "rowSpan": 3,
-        "children": [
-          {
-            "id": "t-plot",
-            "type": "waveform",
-            "read": "tc1.temperature",
-            "window": 60,
-            "traces": {
-              "tc1.temperature": {
-                "color": "#16a34a"
-              }
-            }
-          }
-        ]
-      },
-      {
-        "id": "t",
-        "type": "readout",
-        "read": "tc1.temperature",
-        "label": "Board temperature",
-        "size": "lg",
-        "accent": "#16a34a",
-        "col": 8,
-        "row": 6,
-        "colSpan": 4,
-        "rowSpan": 3,
-        "warnMax": 70,
-        "limitMax": 85
-      },
-      {
-        "id": "controls",
-        "type": "row",
-        "title": "Supply",
-        "col": 0,
-        "row": 9,
-        "colSpan": 12,
-        "rowSpan": 2,
-        "children": [
-          {
-            "id": "sv",
-            "type": "setpoint",
-            "read": "psu1.1.voltage",
-            "write": "psu1.1.set_voltage",
-            "label": "Set voltage",
-            "variant": "stepper",
-            "accent": "#2563eb"
+            ]
           },
           {
-            "id": "si",
-            "type": "setpoint",
-            "read": "psu1.1.current",
-            "write": "psu1.1.set_current",
-            "label": "Current limit",
-            "variant": "stepper",
-            "accent": "#d97706"
-          },
-          {
-            "id": "on",
+            "id": "out",
             "type": "toggle",
-            "read": "psu1.1.output",
-            "write": "psu1.1.set_output",
             "label": "Output",
-            "accent": "#2563eb"
+            "read": "psu1.1.output",
+            "write": "psu1.1.set_output"
           },
           {
-            "id": "ok",
-            "type": "indicator",
+            "id": "setv",
+            "type": "setpoint",
+            "label": "Set voltage",
+            "read": "psu1.1.voltage_setpoint",
+            "write": "psu1.1.set_voltage",
+            "variant": "stepper"
+          },
+          {
+            "id": "seti",
+            "type": "setpoint",
+            "label": "Current limit",
+            "read": "psu1.1.current_limit",
+            "write": "psu1.1.set_current",
+            "variant": "stepper"
+          }
+        ]
+      },
+      {
+        "id": "load",
+        "type": "panel",
+        "title": "Load",
+        "col": 8,
+        "row": 3,
+        "colSpan": 4,
+        "rowSpan": 3,
+        "children": [
+          {
+            "id": "p",
+            "type": "readout",
+            "read": "eload1.1.power",
+            "label": "Power",
+            "size": "md"
+          },
+          {
+            "id": "in",
+            "type": "toggle",
+            "label": "Input",
+            "read": "eload1.1.input",
+            "write": "eload1.1.set_input"
+          },
+          {
+            "id": "setc",
+            "type": "setpoint",
+            "label": "Set current",
+            "read": "eload1.1.current_set",
+            "write": "eload1.1.set_current",
+            "variant": "stepper"
+          }
+        ]
+      },
+      {
+        "id": "temps",
+        "type": "panel",
+        "title": "Temperatures",
+        "col": 0,
+        "row": 6,
+        "colSpan": 12,
+        "rowSpan": 3,
+        "children": [
+          {
+            "id": "temps-plot",
+            "type": "waveform",
+            "read": "daq1.ai0",
             "reads": [
-              "psu1.1.output",
-              "bms1.fault"
+              "daq1.ai1",
+              "daq1.ai2",
+              "daq1.ai3",
+              "daq1.ai4",
+              "daq1.ai5",
+              "daq1.ai6",
+              "daq1.ai7"
             ],
-            "labels": [
-              "Output",
-              "BMS fault"
-            ],
-            "style": "chip"
+            "window": 600,
+            "traces": {
+              "daq1.ai0": {
+                "name": "TC 1"
+              },
+              "daq1.ai1": {
+                "name": "TC 2"
+              },
+              "daq1.ai2": {
+                "name": "TC 3"
+              },
+              "daq1.ai3": {
+                "name": "TC 4"
+              },
+              "daq1.ai4": {
+                "name": "TC 5"
+              },
+              "daq1.ai5": {
+                "name": "TC 6"
+              },
+              "daq1.ai6": {
+                "name": "TC 7"
+              },
+              "daq1.ai7": {
+                "name": "TC 8"
+              }
+            }
           }
         ]
       }

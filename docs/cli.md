@@ -247,7 +247,7 @@ later, the rack de-energizes the rig itself.
 guppi ls [prefix]           guppi cat <path>
 guppi put <local|-> [path]  guppi rm <path>
 guppi pull [dir]            guppi push [dir] [--check]
-guppi preview <file|-|path>
+guppi preview <file|-|path> [--png] [-o out.png]
 ```
 
 Dashboards (`dashboards/*.json`) and data views (`data-views/*.json`) are
@@ -266,6 +266,12 @@ needed (or a workspace path): every block a box at its grid cell and span,
 placed the way the app places it, with a panel's title on its border and one
 line per graph, readout, toggle or setpoint inside. A box ending in `+N more`
 is too small for its contents. It shows layout only, not colours or plots.
+`--png` draws the board as a picture instead, the way the app lays it out:
+panes and titles, a P&ID's parts with every wire and pipe routed, a
+placeholder trace on each plot. It writes the PNG beside the file (or to
+`-o`) and prints its path. It needs the `preview` extra
+(`pip install 'guppi-cli[preview]'`, not available on Linux ARM); without
+it, `--png` says so and prints the text instead.
 
 `push --check` (or `put <file> --check` for one file) checks pages without
 uploading anything: the JSON shape and every signal
