@@ -1,0 +1,92 @@
+[
+  {
+    "id": "daq2-graph",
+    "type": "panel",
+    "title": "Inputs",
+    "col": 0,
+    "row": 0,
+    "colSpan": 8,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "daq2-graph-plot",
+        "type": "waveform",
+        "read": "daq2.ai0",
+        "reads": [
+          "daq2.ai1",
+          "daq2.ai2",
+          "daq2.ai3"
+        ],
+        "window": 60,
+        "traces": {
+          "daq2.ai0": {
+            "name": "Main",
+            "color": "#E6B400"
+          },
+          "daq2.ai1": {
+            "name": "Logic",
+            "color": "#12B5D4"
+          },
+          "daq2.ai2": {
+            "name": "Core",
+            "color": "#D63AF0"
+          },
+          "daq2.ai3": {
+            "name": "Sense",
+            "color": "#22B573"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "daq2",
+    "type": "panel",
+    "title": "Inputs",
+    "col": 8,
+    "row": 0,
+    "colSpan": 4,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "daq2-g",
+        "type": "grid",
+        "columns": 2,
+        "children": [
+          {
+            "id": "daq2-ai0",
+            "type": "readout",
+            "read": "daq2.ai0",
+            "label": "Main",
+            "size": "md",
+            "accent": "#E6B400"
+          },
+          {
+            "id": "daq2-ai1",
+            "type": "readout",
+            "read": "daq2.ai1",
+            "label": "Logic",
+            "size": "md",
+            "accent": "#12B5D4"
+          },
+          {
+            "id": "daq2-ai2",
+            "type": "readout",
+            "read": "daq2.ai2",
+            "label": "Core",
+            "size": "md",
+            "accent": "#D63AF0"
+          },
+          {
+            "id": "daq2-ai3",
+            "type": "readout",
+            "read": "daq2.ai3",
+            "label": "Sense",
+            "size": "md",
+            "accent": "#22B573"
+          }
+        ]
+      }
+    ]
+  }
+]

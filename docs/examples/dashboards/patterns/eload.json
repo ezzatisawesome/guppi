@@ -1,0 +1,87 @@
+[
+  {
+    "id": "eload1-graph",
+    "type": "panel",
+    "title": "Load",
+    "col": 0,
+    "row": 0,
+    "colSpan": 8,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "eload1-graph-plot",
+        "type": "waveform",
+        "read": "eload1.1.current",
+        "reads": [
+          "eload1.1.voltage"
+        ],
+        "window": 60,
+        "traces": {
+          "eload1.1.current": {
+            "name": "Current",
+            "color": "#E6B400"
+          },
+          "eload1.1.voltage": {
+            "name": "Voltage",
+            "color": "#12B5D4"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "eload1",
+    "type": "panel",
+    "title": "Load",
+    "col": 8,
+    "row": 0,
+    "colSpan": 4,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "eload1-r",
+        "type": "row",
+        "children": [
+          {
+            "id": "eload1-i",
+            "type": "readout",
+            "read": "eload1.1.current",
+            "label": "Current",
+            "size": "lg",
+            "accent": "#E6B400"
+          },
+          {
+            "id": "eload1-v",
+            "type": "readout",
+            "read": "eload1.1.voltage",
+            "label": "Voltage",
+            "size": "md",
+            "accent": "#12B5D4"
+          },
+          {
+            "id": "eload1-p",
+            "type": "readout",
+            "read": "eload1.1.power",
+            "label": "Power",
+            "size": "md"
+          }
+        ]
+      },
+      {
+        "id": "eload1-in",
+        "type": "toggle",
+        "label": "Input",
+        "read": "eload1.1.input",
+        "write": "eload1.1.set_input"
+      },
+      {
+        "id": "eload1-sc",
+        "type": "setpoint",
+        "label": "Set current",
+        "read": "eload1.1.current_set",
+        "write": "eload1.1.set_current",
+        "variant": "stepper"
+      }
+    ]
+  }
+]

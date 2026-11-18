@@ -1,0 +1,72 @@
+[
+  {
+    "id": "scope1-graph",
+    "type": "panel",
+    "title": "Ripple",
+    "col": 0,
+    "row": 0,
+    "colSpan": 8,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "scope1-graph-plot",
+        "type": "waveform",
+        "read": "scope1.1.vpp",
+        "window": 60,
+        "traces": {
+          "scope1.1.vpp": {
+            "name": "Ripple",
+            "color": "#E6B400"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "scope1",
+    "type": "panel",
+    "title": "Scope",
+    "col": 8,
+    "row": 0,
+    "colSpan": 4,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "scope1-r",
+        "type": "row",
+        "children": [
+          {
+            "id": "scope1-vpp",
+            "type": "readout",
+            "read": "scope1.1.vpp",
+            "label": "Ripple",
+            "size": "lg",
+            "accent": "#E6B400"
+          },
+          {
+            "id": "scope1-f",
+            "type": "readout",
+            "read": "scope1.1.frequency",
+            "label": "Frequency",
+            "size": "md"
+          },
+          {
+            "id": "scope1-d",
+            "type": "readout",
+            "read": "scope1.1.duty",
+            "label": "Duty",
+            "size": "md"
+          }
+        ]
+      },
+      {
+        "id": "scope1-cap",
+        "type": "button",
+        "label": "Capture",
+        "write": "scope1.capture_screenshot",
+        "variant": "instant",
+        "hsize": "fill"
+      }
+    ]
+  }
+]

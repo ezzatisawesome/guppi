@@ -1,0 +1,88 @@
+[
+  {
+    "id": "psu1-1-graph",
+    "type": "panel",
+    "title": "Supply",
+    "col": 0,
+    "row": 0,
+    "colSpan": 8,
+    "rowSpan": 3,
+    "children": [
+      {
+        "id": "psu1-1-graph-plot",
+        "type": "waveform",
+        "read": "psu1.1.voltage",
+        "reads": [
+          "psu1.1.current"
+        ],
+        "window": 60,
+        "traces": {
+          "psu1.1.voltage": {
+            "name": "Voltage",
+            "color": "#E6B400"
+          },
+          "psu1.1.current": {
+            "name": "Current",
+            "color": "#12B5D4"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "psu1-1",
+    "type": "panel",
+    "title": "Supply",
+    "col": 8,
+    "row": 0,
+    "colSpan": 4,
+    "rowSpan": 3,
+    "children": [
+      {
+        "id": "psu1-1-r",
+        "type": "row",
+        "children": [
+          {
+            "id": "psu1-1-v",
+            "type": "readout",
+            "read": "psu1.1.voltage",
+            "label": "Voltage",
+            "size": "lg",
+            "accent": "#E6B400"
+          },
+          {
+            "id": "psu1-1-i",
+            "type": "readout",
+            "read": "psu1.1.current",
+            "label": "Current",
+            "size": "md",
+            "accent": "#12B5D4"
+          }
+        ]
+      },
+      {
+        "id": "psu1-1-out",
+        "type": "toggle",
+        "label": "Output",
+        "read": "psu1.1.output",
+        "write": "psu1.1.set_output"
+      },
+      {
+        "id": "psu1-1-sv",
+        "type": "setpoint",
+        "label": "Set voltage",
+        "read": "psu1.1.voltage_setpoint",
+        "write": "psu1.1.set_voltage",
+        "variant": "stepper"
+      },
+      {
+        "id": "psu1-1-si",
+        "type": "setpoint",
+        "label": "Current limit",
+        "read": "psu1.1.current_limit",
+        "write": "psu1.1.set_current",
+        "variant": "stepper"
+      }
+    ]
+  }
+]

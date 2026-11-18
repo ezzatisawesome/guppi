@@ -1,0 +1,141 @@
+{
+  "kind": "dashboard",
+  "id": "production-functional",
+  "title": "Functional test",
+  "root": {
+    "id": "root",
+    "type": "canvas",
+    "children": [
+      {
+        "id": "dut1-graph",
+        "type": "panel",
+        "title": "Bus",
+        "col": 0,
+        "row": 0,
+        "colSpan": 8,
+        "rowSpan": 5,
+        "children": [
+          {
+            "id": "dut1-graph-plot",
+            "type": "waveform",
+            "read": "dut1.bus_voltage",
+            "reads": [
+              "dut1.bus_current"
+            ],
+            "window": 60,
+            "traces": {
+              "dut1.bus_voltage": {
+                "name": "Bus voltage",
+                "color": "#E6B400"
+              },
+              "dut1.bus_current": {
+                "name": "Bus current",
+                "color": "#12B5D4"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "dut1",
+        "type": "panel",
+        "title": "DUT",
+        "col": 8,
+        "row": 0,
+        "colSpan": 4,
+        "rowSpan": 2,
+        "children": [
+          {
+            "id": "dut1-r",
+            "type": "row",
+            "children": [
+              {
+                "id": "dut1-bus_voltage",
+                "type": "readout",
+                "read": "dut1.bus_voltage",
+                "label": "Bus voltage",
+                "size": "lg",
+                "accent": "#E6B400"
+              },
+              {
+                "id": "dut1-bus_current",
+                "type": "readout",
+                "read": "dut1.bus_current",
+                "label": "Bus current",
+                "size": "md",
+                "accent": "#12B5D4"
+              },
+              {
+                "id": "dut1-board_temp",
+                "type": "readout",
+                "read": "dut1.board_temp",
+                "label": "Board temp",
+                "size": "md"
+              }
+            ]
+          },
+          {
+            "id": "dut1-en",
+            "type": "toggle",
+            "label": "Enable",
+            "read": "dut1.enable",
+            "write": "dut1.set_enable"
+          }
+        ]
+      },
+      {
+        "id": "relay1",
+        "type": "panel",
+        "title": "Relays",
+        "col": 8,
+        "row": 2,
+        "colSpan": 4,
+        "rowSpan": 3,
+        "children": [
+          {
+            "id": "relay1-1",
+            "type": "toggle",
+            "label": "DUT power",
+            "read": "relay1.1.state",
+            "write": "relay1.1.set_state"
+          },
+          {
+            "id": "relay1-2",
+            "type": "toggle",
+            "label": "Load",
+            "read": "relay1.2.state",
+            "write": "relay1.2.set_state"
+          },
+          {
+            "id": "relay1-3",
+            "type": "toggle",
+            "label": "CAN termination",
+            "read": "relay1.3.state",
+            "write": "relay1.3.set_state"
+          },
+          {
+            "id": "relay1-4",
+            "type": "toggle",
+            "label": "Fan",
+            "read": "relay1.4.state",
+            "write": "relay1.4.set_state"
+          },
+          {
+            "id": "relay1-5",
+            "type": "toggle",
+            "label": "Heater",
+            "read": "relay1.5.state",
+            "write": "relay1.5.set_state"
+          },
+          {
+            "id": "relay1-6",
+            "type": "toggle",
+            "label": "Fixture clamp",
+            "read": "relay1.6.state",
+            "write": "relay1.6.set_state"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,81 @@
+[
+  {
+    "id": "sas1-graph",
+    "type": "panel",
+    "title": "IV curve",
+    "col": 0,
+    "row": 0,
+    "colSpan": 8,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "sas1-graph-plot",
+        "type": "xy_plot",
+        "series": [
+          {
+            "x": "sas1.1.voltage",
+            "y": "sas1.1.current",
+            "label": "Array",
+            "color": "#E6B400",
+            "accumulate": true,
+            "window": 120,
+            "fade": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "sas1",
+    "type": "panel",
+    "title": "Array",
+    "col": 8,
+    "row": 0,
+    "colSpan": 4,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "sas1-r",
+        "type": "row",
+        "children": [
+          {
+            "id": "sas1-p",
+            "type": "readout",
+            "read": "sas1.1.power",
+            "label": "Power",
+            "size": "lg"
+          },
+          {
+            "id": "sas1-v",
+            "type": "readout",
+            "read": "sas1.1.voltage",
+            "label": "Voltage",
+            "size": "md"
+          },
+          {
+            "id": "sas1-i",
+            "type": "readout",
+            "read": "sas1.1.current",
+            "label": "Current",
+            "size": "md"
+          }
+        ]
+      },
+      {
+        "id": "sas1-out",
+        "type": "toggle",
+        "label": "Output",
+        "read": "sas1.1.output",
+        "write": "sas1.1.set_output"
+      },
+      {
+        "id": "sas1-irr",
+        "type": "setpoint",
+        "label": "Irradiance",
+        "read": "sas1.1.irradiance",
+        "write": "sas1.1.set_irradiance",
+        "variant": "stepper"
+      }
+    ]
+  }
+]

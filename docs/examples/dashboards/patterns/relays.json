@@ -1,0 +1,55 @@
+[
+  {
+    "id": "relay1",
+    "type": "panel",
+    "title": "Relays",
+    "col": 0,
+    "row": 0,
+    "colSpan": 4,
+    "rowSpan": 3,
+    "children": [
+      {
+        "id": "relay1-1",
+        "type": "toggle",
+        "label": "DUT power",
+        "read": "relay1.1.state",
+        "write": "relay1.1.set_state"
+      },
+      {
+        "id": "relay1-2",
+        "type": "toggle",
+        "label": "Load",
+        "read": "relay1.2.state",
+        "write": "relay1.2.set_state"
+      },
+      {
+        "id": "relay1-3",
+        "type": "toggle",
+        "label": "CAN termination",
+        "read": "relay1.3.state",
+        "write": "relay1.3.set_state"
+      },
+      {
+        "id": "relay1-4",
+        "type": "toggle",
+        "label": "Fan",
+        "read": "relay1.4.state",
+        "write": "relay1.4.set_state"
+      },
+      {
+        "id": "relay1-5",
+        "type": "toggle",
+        "label": "Heater",
+        "read": "relay1.5.state",
+        "write": "relay1.5.set_state"
+      },
+      {
+        "id": "relay1-6",
+        "type": "toggle",
+        "label": "Fixture clamp",
+        "read": "relay1.6.state",
+        "write": "relay1.6.set_state"
+      }
+    ]
+  }
+]

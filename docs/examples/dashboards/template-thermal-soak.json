@@ -1,0 +1,252 @@
+{
+  "kind": "dashboard",
+  "id": "thermal-soak",
+  "title": "Thermal soak",
+  "root": {
+    "id": "root",
+    "type": "canvas",
+    "children": [
+      {
+        "id": "daq1-graph",
+        "type": "panel",
+        "title": "Temperatures",
+        "col": 0,
+        "row": 0,
+        "colSpan": 8,
+        "rowSpan": 8,
+        "children": [
+          {
+            "id": "daq1-graph-plot",
+            "type": "waveform",
+            "read": "daq1.ai0",
+            "reads": [
+              "daq1.ai1",
+              "daq1.ai2",
+              "daq1.ai3",
+              "daq1.ai4",
+              "daq1.ai5",
+              "daq1.ai6",
+              "daq1.ai7"
+            ],
+            "window": 1800,
+            "traces": {
+              "daq1.ai0": {
+                "name": "TC 1",
+                "color": "#E6B400"
+              },
+              "daq1.ai1": {
+                "name": "TC 2",
+                "color": "#12B5D4"
+              },
+              "daq1.ai2": {
+                "name": "TC 3",
+                "color": "#D63AF0"
+              },
+              "daq1.ai3": {
+                "name": "TC 4",
+                "color": "#22B573"
+              },
+              "daq1.ai4": {
+                "name": "TC 5",
+                "color": "#F57C00"
+              },
+              "daq1.ai5": {
+                "name": "TC 6",
+                "color": "#3D7DFF"
+              },
+              "daq1.ai6": {
+                "name": "TC 7",
+                "color": "#B07A55"
+              },
+              "daq1.ai7": {
+                "name": "TC 8",
+                "color": "#9B6BD6"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "daq1",
+        "type": "panel",
+        "title": "Thermocouples",
+        "col": 8,
+        "row": 0,
+        "colSpan": 4,
+        "rowSpan": 3,
+        "children": [
+          {
+            "id": "daq1-g",
+            "type": "grid",
+            "columns": 2,
+            "children": [
+              {
+                "id": "daq1-tc0",
+                "type": "readout",
+                "read": "daq1.ai0",
+                "label": "TC 1",
+                "size": "md",
+                "accent": "#E6B400"
+              },
+              {
+                "id": "daq1-tc1",
+                "type": "readout",
+                "read": "daq1.ai1",
+                "label": "TC 2",
+                "size": "md",
+                "accent": "#12B5D4"
+              },
+              {
+                "id": "daq1-tc2",
+                "type": "readout",
+                "read": "daq1.ai2",
+                "label": "TC 3",
+                "size": "md",
+                "accent": "#D63AF0"
+              },
+              {
+                "id": "daq1-tc3",
+                "type": "readout",
+                "read": "daq1.ai3",
+                "label": "TC 4",
+                "size": "md",
+                "accent": "#22B573"
+              },
+              {
+                "id": "daq1-tc4",
+                "type": "readout",
+                "read": "daq1.ai4",
+                "label": "TC 5",
+                "size": "md",
+                "accent": "#F57C00"
+              },
+              {
+                "id": "daq1-tc5",
+                "type": "readout",
+                "read": "daq1.ai5",
+                "label": "TC 6",
+                "size": "md",
+                "accent": "#3D7DFF"
+              },
+              {
+                "id": "daq1-tc6",
+                "type": "readout",
+                "read": "daq1.ai6",
+                "label": "TC 7",
+                "size": "md",
+                "accent": "#B07A55"
+              },
+              {
+                "id": "daq1-tc7",
+                "type": "readout",
+                "read": "daq1.ai7",
+                "label": "TC 8",
+                "size": "md",
+                "accent": "#9B6BD6"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "chamber1",
+        "type": "panel",
+        "title": "Chamber",
+        "col": 8,
+        "row": 3,
+        "colSpan": 4,
+        "rowSpan": 3,
+        "children": [
+          {
+            "id": "chamber1-r",
+            "type": "row",
+            "children": [
+              {
+                "id": "chamber1-t",
+                "type": "readout",
+                "read": "chamber1.temperature",
+                "label": "Temperature",
+                "size": "lg"
+              },
+              {
+                "id": "chamber1-h",
+                "type": "readout",
+                "read": "chamber1.humidity",
+                "label": "Humidity",
+                "size": "md"
+              }
+            ]
+          },
+          {
+            "id": "chamber1-run",
+            "type": "toggle",
+            "label": "Run",
+            "read": "chamber1.running",
+            "write": "chamber1.set_running"
+          },
+          {
+            "id": "chamber1-st",
+            "type": "setpoint",
+            "label": "Set temperature",
+            "read": "chamber1.temperature_setpoint",
+            "write": "chamber1.set_temperature",
+            "variant": "stepper"
+          },
+          {
+            "id": "chamber1-sh",
+            "type": "setpoint",
+            "label": "Set humidity",
+            "read": "chamber1.humidity_setpoint",
+            "write": "chamber1.set_humidity",
+            "variant": "stepper"
+          }
+        ]
+      },
+      {
+        "id": "dut1",
+        "type": "panel",
+        "title": "DUT",
+        "col": 8,
+        "row": 6,
+        "colSpan": 4,
+        "rowSpan": 2,
+        "children": [
+          {
+            "id": "dut1-r",
+            "type": "row",
+            "children": [
+              {
+                "id": "dut1-bus_voltage",
+                "type": "readout",
+                "read": "dut1.bus_voltage",
+                "label": "Bus voltage",
+                "size": "lg"
+              },
+              {
+                "id": "dut1-bus_current",
+                "type": "readout",
+                "read": "dut1.bus_current",
+                "label": "Bus current",
+                "size": "md"
+              },
+              {
+                "id": "dut1-board_temp",
+                "type": "readout",
+                "read": "dut1.board_temp",
+                "label": "Board temp",
+                "size": "md"
+              }
+            ]
+          },
+          {
+            "id": "dut1-en",
+            "type": "toggle",
+            "label": "Enable",
+            "read": "dut1.enable",
+            "write": "dut1.set_enable"
+          }
+        ]
+      }
+    ]
+  }
+}

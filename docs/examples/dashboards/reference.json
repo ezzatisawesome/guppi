@@ -7,13 +7,13 @@
     "type": "canvas",
     "children": [
       {
-        "id": "rail-panel",
+        "id": "rail",
         "type": "panel",
         "title": "Rail",
         "col": 0,
         "row": 0,
         "colSpan": 8,
-        "rowSpan": 6,
+        "rowSpan": 5,
         "children": [
           {
             "id": "rail-plot",
@@ -25,17 +25,19 @@
             "window": 60,
             "traces": {
               "psu1.1.voltage": {
-                "name": "Rail voltage"
+                "name": "Rail voltage",
+                "color": "#E6B400"
               },
               "eload1.1.current": {
-                "name": "Load current"
+                "name": "Load current",
+                "color": "#12B5D4"
               }
             }
           }
         ]
       },
       {
-        "id": "supply",
+        "id": "psu1-1",
         "type": "panel",
         "title": "Supply",
         "col": 8,
@@ -44,20 +46,21 @@
         "rowSpan": 3,
         "children": [
           {
-            "id": "supply-reads",
+            "id": "psu1-1-r",
             "type": "row",
             "children": [
               {
-                "id": "v",
+                "id": "psu1-1-v",
                 "type": "readout",
                 "read": "psu1.1.voltage",
                 "label": "Voltage",
                 "size": "lg",
+                "accent": "#E6B400",
                 "warnMax": 29,
                 "limitMax": 30
               },
               {
-                "id": "i",
+                "id": "psu1-1-i",
                 "type": "readout",
                 "read": "psu1.1.current",
                 "label": "Current",
@@ -66,14 +69,14 @@
             ]
           },
           {
-            "id": "out",
+            "id": "psu1-1-out",
             "type": "toggle",
             "label": "Output",
             "read": "psu1.1.output",
             "write": "psu1.1.set_output"
           },
           {
-            "id": "setv",
+            "id": "psu1-1-sv",
             "type": "setpoint",
             "label": "Set voltage",
             "read": "psu1.1.voltage_setpoint",
@@ -81,7 +84,7 @@
             "variant": "stepper"
           },
           {
-            "id": "seti",
+            "id": "psu1-1-si",
             "type": "setpoint",
             "label": "Current limit",
             "read": "psu1.1.current_limit",
@@ -91,30 +94,44 @@
         ]
       },
       {
-        "id": "load",
+        "id": "eload1",
         "type": "panel",
         "title": "Load",
         "col": 8,
         "row": 3,
         "colSpan": 4,
-        "rowSpan": 3,
+        "rowSpan": 2,
         "children": [
           {
-            "id": "p",
-            "type": "readout",
-            "read": "eload1.1.power",
-            "label": "Power",
-            "size": "md"
+            "id": "eload1-r",
+            "type": "row",
+            "children": [
+              {
+                "id": "eload1-i",
+                "type": "readout",
+                "read": "eload1.1.current",
+                "label": "Current",
+                "size": "lg",
+                "accent": "#12B5D4"
+              },
+              {
+                "id": "eload1-p",
+                "type": "readout",
+                "read": "eload1.1.power",
+                "label": "Power",
+                "size": "md"
+              }
+            ]
           },
           {
-            "id": "in",
+            "id": "eload1-in",
             "type": "toggle",
             "label": "Input",
             "read": "eload1.1.input",
             "write": "eload1.1.set_input"
           },
           {
-            "id": "setc",
+            "id": "eload1-sc",
             "type": "setpoint",
             "label": "Set current",
             "read": "eload1.1.current_set",
@@ -128,7 +145,7 @@
         "type": "panel",
         "title": "Temperatures",
         "col": 0,
-        "row": 6,
+        "row": 5,
         "colSpan": 12,
         "rowSpan": 3,
         "children": [
@@ -139,37 +156,25 @@
             "reads": [
               "daq1.ai1",
               "daq1.ai2",
-              "daq1.ai3",
-              "daq1.ai4",
-              "daq1.ai5",
-              "daq1.ai6",
-              "daq1.ai7"
+              "daq1.ai3"
             ],
             "window": 600,
             "traces": {
               "daq1.ai0": {
-                "name": "TC 1"
+                "name": "TC 1",
+                "color": "#D63AF0"
               },
               "daq1.ai1": {
-                "name": "TC 2"
+                "name": "TC 2",
+                "color": "#22B573"
               },
               "daq1.ai2": {
-                "name": "TC 3"
+                "name": "TC 3",
+                "color": "#F57C00"
               },
               "daq1.ai3": {
-                "name": "TC 4"
-              },
-              "daq1.ai4": {
-                "name": "TC 5"
-              },
-              "daq1.ai5": {
-                "name": "TC 6"
-              },
-              "daq1.ai6": {
-                "name": "TC 7"
-              },
-              "daq1.ai7": {
-                "name": "TC 8"
+                "name": "TC 4",
+                "color": "#3D7DFF"
               }
             }
           }

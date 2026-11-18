@@ -1,0 +1,156 @@
+{
+  "kind": "dashboard",
+  "id": "battery-cycle",
+  "title": "Battery cycle",
+  "root": {
+    "id": "root",
+    "type": "canvas",
+    "children": [
+      {
+        "id": "bms1-graph",
+        "type": "panel",
+        "title": "Pack",
+        "col": 0,
+        "row": 0,
+        "colSpan": 8,
+        "rowSpan": 6,
+        "children": [
+          {
+            "id": "bms1-graph-plot",
+            "type": "waveform",
+            "read": "bms1.pack.voltage",
+            "reads": [
+              "bms1.pack.current"
+            ],
+            "window": 1800,
+            "traces": {
+              "bms1.pack.voltage": {
+                "name": "Voltage",
+                "color": "#E6B400"
+              },
+              "bms1.pack.current": {
+                "name": "Current",
+                "color": "#12B5D4"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "id": "bms1",
+        "type": "panel",
+        "title": "Pack",
+        "col": 8,
+        "row": 0,
+        "colSpan": 4,
+        "rowSpan": 2,
+        "children": [
+          {
+            "id": "bms1-r1",
+            "type": "row",
+            "children": [
+              {
+                "id": "bms1-v",
+                "type": "readout",
+                "read": "bms1.pack.voltage",
+                "label": "Voltage",
+                "size": "lg",
+                "accent": "#E6B400"
+              },
+              {
+                "id": "bms1-i",
+                "type": "readout",
+                "read": "bms1.pack.current",
+                "label": "Current",
+                "size": "md",
+                "accent": "#12B5D4"
+              }
+            ]
+          },
+          {
+            "id": "bms1-r2",
+            "type": "row",
+            "children": [
+              {
+                "id": "bms1-soc",
+                "type": "readout",
+                "read": "bms1.pack.soc",
+                "label": "SoC",
+                "size": "md"
+              },
+              {
+                "id": "bms1-t",
+                "type": "readout",
+                "read": "bms1.pack.temperature",
+                "label": "Temp",
+                "size": "md",
+                "warnMax": 45,
+                "limitMax": 55
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "psu1-1",
+        "type": "panel",
+        "title": "Charger",
+        "col": 8,
+        "row": 2,
+        "colSpan": 4,
+        "rowSpan": 2,
+        "children": [
+          {
+            "id": "psu1-1-out",
+            "type": "toggle",
+            "label": "Charge",
+            "read": "psu1.1.output",
+            "write": "psu1.1.set_output"
+          },
+          {
+            "id": "psu1-1-sv",
+            "type": "setpoint",
+            "label": "Charge voltage",
+            "read": "psu1.1.voltage_setpoint",
+            "write": "psu1.1.set_voltage",
+            "variant": "stepper"
+          },
+          {
+            "id": "psu1-1-si",
+            "type": "setpoint",
+            "label": "Charge current",
+            "read": "psu1.1.current_limit",
+            "write": "psu1.1.set_current",
+            "variant": "stepper"
+          }
+        ]
+      },
+      {
+        "id": "eload1",
+        "type": "panel",
+        "title": "Discharge load",
+        "col": 8,
+        "row": 4,
+        "colSpan": 4,
+        "rowSpan": 2,
+        "children": [
+          {
+            "id": "eload1-in",
+            "type": "toggle",
+            "label": "Discharge",
+            "read": "eload1.1.input",
+            "write": "eload1.1.set_input"
+          },
+          {
+            "id": "eload1-sc",
+            "type": "setpoint",
+            "label": "Discharge current",
+            "read": "eload1.1.current_set",
+            "write": "eload1.1.set_current",
+            "variant": "stepper"
+          }
+        ]
+      }
+    ]
+  }
+}

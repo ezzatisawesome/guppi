@@ -1,0 +1,87 @@
+[
+  {
+    "id": "bms1-graph",
+    "type": "panel",
+    "title": "Pack",
+    "col": 0,
+    "row": 0,
+    "colSpan": 8,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "bms1-graph-plot",
+        "type": "waveform",
+        "read": "bms1.pack.voltage",
+        "reads": [
+          "bms1.pack.current"
+        ],
+        "window": 1800,
+        "traces": {
+          "bms1.pack.voltage": {
+            "name": "Voltage",
+            "color": "#E6B400"
+          },
+          "bms1.pack.current": {
+            "name": "Current",
+            "color": "#12B5D4"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "bms1",
+    "type": "panel",
+    "title": "Pack",
+    "col": 8,
+    "row": 0,
+    "colSpan": 4,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "bms1-r1",
+        "type": "row",
+        "children": [
+          {
+            "id": "bms1-v",
+            "type": "readout",
+            "read": "bms1.pack.voltage",
+            "label": "Voltage",
+            "size": "lg",
+            "accent": "#E6B400"
+          },
+          {
+            "id": "bms1-i",
+            "type": "readout",
+            "read": "bms1.pack.current",
+            "label": "Current",
+            "size": "md",
+            "accent": "#12B5D4"
+          }
+        ]
+      },
+      {
+        "id": "bms1-r2",
+        "type": "row",
+        "children": [
+          {
+            "id": "bms1-soc",
+            "type": "readout",
+            "read": "bms1.pack.soc",
+            "label": "SoC",
+            "size": "md"
+          },
+          {
+            "id": "bms1-t",
+            "type": "readout",
+            "read": "bms1.pack.temperature",
+            "label": "Temp",
+            "size": "md",
+            "warnMax": 45,
+            "limitMax": 55
+          }
+        ]
+      }
+    ]
+  }
+]

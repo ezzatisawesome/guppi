@@ -1,0 +1,154 @@
+[
+  {
+    "id": "psu1-graph",
+    "type": "panel",
+    "title": "Rails",
+    "col": 0,
+    "row": 0,
+    "colSpan": 8,
+    "rowSpan": 6,
+    "children": [
+      {
+        "id": "psu1-graph-plot",
+        "type": "waveform",
+        "read": "psu1.1.voltage",
+        "reads": [
+          "psu1.2.voltage",
+          "psu1.3.voltage"
+        ],
+        "window": 60,
+        "traces": {
+          "psu1.1.voltage": {
+            "name": "CH1",
+            "color": "#E6B400"
+          },
+          "psu1.2.voltage": {
+            "name": "CH2",
+            "color": "#12B5D4"
+          },
+          "psu1.3.voltage": {
+            "name": "CH3",
+            "color": "#D63AF0"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "psu1-1",
+    "type": "panel",
+    "title": "CH1",
+    "col": 8,
+    "row": 0,
+    "colSpan": 4,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "psu1-1-r",
+        "type": "row",
+        "children": [
+          {
+            "id": "psu1-1-v",
+            "type": "readout",
+            "read": "psu1.1.voltage",
+            "label": "Voltage",
+            "size": "lg",
+            "accent": "#E6B400"
+          },
+          {
+            "id": "psu1-1-i",
+            "type": "readout",
+            "read": "psu1.1.current",
+            "label": "Current",
+            "size": "md"
+          }
+        ]
+      },
+      {
+        "id": "psu1-1-out",
+        "type": "toggle",
+        "label": "Output",
+        "read": "psu1.1.output",
+        "write": "psu1.1.set_output"
+      }
+    ]
+  },
+  {
+    "id": "psu1-2",
+    "type": "panel",
+    "title": "CH2",
+    "col": 8,
+    "row": 2,
+    "colSpan": 4,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "psu1-2-r",
+        "type": "row",
+        "children": [
+          {
+            "id": "psu1-2-v",
+            "type": "readout",
+            "read": "psu1.2.voltage",
+            "label": "Voltage",
+            "size": "lg",
+            "accent": "#12B5D4"
+          },
+          {
+            "id": "psu1-2-i",
+            "type": "readout",
+            "read": "psu1.2.current",
+            "label": "Current",
+            "size": "md"
+          }
+        ]
+      },
+      {
+        "id": "psu1-2-out",
+        "type": "toggle",
+        "label": "Output",
+        "read": "psu1.2.output",
+        "write": "psu1.2.set_output"
+      }
+    ]
+  },
+  {
+    "id": "psu1-3",
+    "type": "panel",
+    "title": "CH3",
+    "col": 8,
+    "row": 4,
+    "colSpan": 4,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "psu1-3-r",
+        "type": "row",
+        "children": [
+          {
+            "id": "psu1-3-v",
+            "type": "readout",
+            "read": "psu1.3.voltage",
+            "label": "Voltage",
+            "size": "lg",
+            "accent": "#D63AF0"
+          },
+          {
+            "id": "psu1-3-i",
+            "type": "readout",
+            "read": "psu1.3.current",
+            "label": "Current",
+            "size": "md"
+          }
+        ]
+      },
+      {
+        "id": "psu1-3-out",
+        "type": "toggle",
+        "label": "Output",
+        "read": "psu1.3.output",
+        "write": "psu1.3.set_output"
+      }
+    ]
+  }
+]

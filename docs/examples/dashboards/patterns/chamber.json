@@ -1,0 +1,88 @@
+[
+  {
+    "id": "chamber1-graph",
+    "type": "panel",
+    "title": "Chamber",
+    "col": 0,
+    "row": 0,
+    "colSpan": 8,
+    "rowSpan": 3,
+    "children": [
+      {
+        "id": "chamber1-graph-plot",
+        "type": "waveform",
+        "read": "chamber1.temperature",
+        "reads": [
+          "chamber1.humidity"
+        ],
+        "window": 1800,
+        "traces": {
+          "chamber1.temperature": {
+            "name": "Temperature",
+            "color": "#E6B400"
+          },
+          "chamber1.humidity": {
+            "name": "Humidity",
+            "color": "#12B5D4"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "chamber1",
+    "type": "panel",
+    "title": "Chamber",
+    "col": 8,
+    "row": 0,
+    "colSpan": 4,
+    "rowSpan": 3,
+    "children": [
+      {
+        "id": "chamber1-r",
+        "type": "row",
+        "children": [
+          {
+            "id": "chamber1-t",
+            "type": "readout",
+            "read": "chamber1.temperature",
+            "label": "Temperature",
+            "size": "lg",
+            "accent": "#E6B400"
+          },
+          {
+            "id": "chamber1-h",
+            "type": "readout",
+            "read": "chamber1.humidity",
+            "label": "Humidity",
+            "size": "md",
+            "accent": "#12B5D4"
+          }
+        ]
+      },
+      {
+        "id": "chamber1-run",
+        "type": "toggle",
+        "label": "Run",
+        "read": "chamber1.running",
+        "write": "chamber1.set_running"
+      },
+      {
+        "id": "chamber1-st",
+        "type": "setpoint",
+        "label": "Set temperature",
+        "read": "chamber1.temperature_setpoint",
+        "write": "chamber1.set_temperature",
+        "variant": "stepper"
+      },
+      {
+        "id": "chamber1-sh",
+        "type": "setpoint",
+        "label": "Set humidity",
+        "read": "chamber1.humidity_setpoint",
+        "write": "chamber1.set_humidity",
+        "variant": "stepper"
+      }
+    ]
+  }
+]

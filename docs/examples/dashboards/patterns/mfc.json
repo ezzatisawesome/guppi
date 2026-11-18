@@ -1,0 +1,72 @@
+[
+  {
+    "id": "mfc1-graph",
+    "type": "panel",
+    "title": "Flow",
+    "col": 0,
+    "row": 0,
+    "colSpan": 8,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "mfc1-graph-plot",
+        "type": "waveform",
+        "read": "mfc1.mass_flow",
+        "window": 60,
+        "traces": {
+          "mfc1.mass_flow": {
+            "name": "Flow",
+            "color": "#E6B400"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "mfc1",
+    "type": "panel",
+    "title": "Flow controller",
+    "col": 8,
+    "row": 0,
+    "colSpan": 4,
+    "rowSpan": 2,
+    "children": [
+      {
+        "id": "mfc1-r",
+        "type": "row",
+        "children": [
+          {
+            "id": "mfc1-f",
+            "type": "readout",
+            "read": "mfc1.mass_flow",
+            "label": "Flow",
+            "size": "lg",
+            "accent": "#E6B400"
+          },
+          {
+            "id": "mfc1-p",
+            "type": "readout",
+            "read": "mfc1.pressure",
+            "label": "Pressure",
+            "size": "md"
+          },
+          {
+            "id": "mfc1-t",
+            "type": "readout",
+            "read": "mfc1.temperature",
+            "label": "Gas temp",
+            "size": "md"
+          }
+        ]
+      },
+      {
+        "id": "mfc1-sp",
+        "type": "setpoint",
+        "label": "Set flow",
+        "read": "mfc1.setpoint",
+        "write": "mfc1.set_setpoint",
+        "variant": "stepper"
+      }
+    ]
+  }
+]

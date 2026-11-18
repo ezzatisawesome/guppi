@@ -1,0 +1,167 @@
+{
+  "kind": "dashboard",
+  "id": "solar-mppt",
+  "title": "Solar MPPT",
+  "root": {
+    "id": "root",
+    "type": "canvas",
+    "children": [
+      {
+        "id": "sas1-graph",
+        "type": "panel",
+        "title": "IV curve",
+        "col": 0,
+        "row": 0,
+        "colSpan": 8,
+        "rowSpan": 4,
+        "children": [
+          {
+            "id": "sas1-graph-plot",
+            "type": "xy_plot",
+            "series": [
+              {
+                "x": "sas1.1.voltage",
+                "y": "sas1.1.current",
+                "label": "Array",
+                "color": "#E6B400",
+                "accumulate": true,
+                "window": 120,
+                "fade": true
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "sas1",
+        "type": "panel",
+        "title": "Array",
+        "col": 8,
+        "row": 0,
+        "colSpan": 4,
+        "rowSpan": 2,
+        "children": [
+          {
+            "id": "sas1-r",
+            "type": "row",
+            "children": [
+              {
+                "id": "sas1-p",
+                "type": "readout",
+                "read": "sas1.1.power",
+                "label": "Power",
+                "size": "lg",
+                "accent": "#F57C00"
+              },
+              {
+                "id": "sas1-v",
+                "type": "readout",
+                "read": "sas1.1.voltage",
+                "label": "Voltage",
+                "size": "md"
+              },
+              {
+                "id": "sas1-i",
+                "type": "readout",
+                "read": "sas1.1.current",
+                "label": "Current",
+                "size": "md"
+              }
+            ]
+          },
+          {
+            "id": "sas1-out",
+            "type": "toggle",
+            "label": "Output",
+            "read": "sas1.1.output",
+            "write": "sas1.1.set_output"
+          },
+          {
+            "id": "sas1-irr",
+            "type": "setpoint",
+            "label": "Irradiance",
+            "read": "sas1.1.irradiance",
+            "write": "sas1.1.set_irradiance",
+            "variant": "stepper"
+          }
+        ]
+      },
+      {
+        "id": "mppt1",
+        "type": "panel",
+        "title": "MPPT",
+        "col": 8,
+        "row": 2,
+        "colSpan": 4,
+        "rowSpan": 2,
+        "children": [
+          {
+            "id": "mppt1-r",
+            "type": "row",
+            "children": [
+              {
+                "id": "mppt1-output_power",
+                "type": "readout",
+                "read": "mppt1.output_power",
+                "label": "Output power",
+                "size": "lg",
+                "accent": "#22B573"
+              },
+              {
+                "id": "mppt1-output_voltage",
+                "type": "readout",
+                "read": "mppt1.output_voltage",
+                "label": "Output voltage",
+                "size": "md"
+              },
+              {
+                "id": "mppt1-output_current",
+                "type": "readout",
+                "read": "mppt1.output_current",
+                "label": "Output current",
+                "size": "md"
+              }
+            ]
+          },
+          {
+            "id": "mppt1-en",
+            "type": "toggle",
+            "label": "Enable",
+            "read": "mppt1.enable",
+            "write": "mppt1.set_enable"
+          }
+        ]
+      },
+      {
+        "id": "power",
+        "type": "panel",
+        "title": "Power",
+        "col": 0,
+        "row": 4,
+        "colSpan": 12,
+        "rowSpan": 3,
+        "children": [
+          {
+            "id": "power-plot",
+            "type": "waveform",
+            "read": "sas1.1.power",
+            "reads": [
+              "mppt1.output_power"
+            ],
+            "window": 600,
+            "traces": {
+              "sas1.1.power": {
+                "name": "Array",
+                "color": "#F57C00"
+              },
+              "mppt1.output_power": {
+                "name": "MPPT output",
+                "color": "#22B573"
+              }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}
