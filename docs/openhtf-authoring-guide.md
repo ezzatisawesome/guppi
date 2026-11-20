@@ -616,7 +616,11 @@ output off (`set_output(ch, False)`), don't scale to zero.
     `CV`, `CC`, `FLT`, …).
   - `clear_output_protection(ch)` clears most trips (OVP/OCP/OT) — **but `FLT` is a
     hardware-fault latch that only a power cycle clears.** The driver logs if `FLT`
-    is still set after a clear.
+    is still set after a clear. From the catalog it is `sasN.<ch>.clear_protection`
+    (energizing: the output comes back as it was set).
+  - **A trip latches across runs and `output` still reads 1** (it is what is set).
+    `{ch}.delivering` is 1 only when the output is on and no protection holds it
+    off; check `{ch}.protection_tripped` before turn-on.
   - Frame-level faults (`frame_faulted` telemetry signal / `frame_conditions()`):
     fan, over-temp, missing lockout bar, input power fail, or **FPL** (summed power
     exceeded) — any of these takes down every channel.
@@ -630,7 +634,7 @@ output off (`set_output(ch, False)`), don't scale to zero.
 
 Per installed channel: `{ch}.voltage`, `{ch}.current`, `{ch}.output`,
 `{ch}.voltage_setpoint`, `{ch}.current_setpoint`, `{ch}.protection_tripped`,
-`{ch}.diode_mode`, `{ch}.thermal_margin_c`. Rig-wide: `frame_faulted`.
+`{ch}.delivering`, `{ch}.diode_mode`, `{ch}.thermal_margin_c`. Rig-wide: `frame_faulted`.
 
 `thermal_margin_c` is worth watching in a long irradiance-at-full-power run: the
 module derates current 1 %/°C above 40 °C ambient, so a shrinking margin predicts
