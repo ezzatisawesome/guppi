@@ -146,9 +146,16 @@ shared across phases and runs.
 | `grid` | `(**axes) -> list[point]` | build a Cartesian setpoint matrix |
 | `sweep` | `(points, apply, measure, *, settle_s=0.0, on_point=None) -> rows` | drive the matrix: command → settle → measure |
 | `prompt` | `(text, kind="confirm", timeout_s=None) -> Any` | pause the phase and ask a human/agent |
+| `param` | `(name, default) -> value` | a parameter of the run, read at module level: `CH = param("ch", 1)`. `guppi run load_step --param ch=2` sets it, converted to `default`'s type; unset, the run uses `default`. The run is named by its parameters (`load_step · ch=2`), so one file serves every port or unit instead of a copy per constant, and runs that differ only in a parameter are told apart. A `--param` the test never asks for fails the start, so a typo can't run the default. |
+| `stream` | `(measurement) -> measurement` | also plot a measurement on the channel `test.<name>` (or write `htf.Measurement("x").stream()`); only for a real time series (§4) |
 
 Off the rack (a linter, a unit test of a helper), `sleep` is plain
-`time.sleep` and the rest raise `RuntimeError`, so the file always imports.
+`time.sleep`, `param` returns its default, and the rest raise `RuntimeError`,
+so the file always imports.
+
+A run can also be given a title and tags when it starts —
+`guppi run load_step --param ch=2 --title "CH2 load step, hot" --tag dvt` — and
+renamed, tagged or deleted afterwards (`guppi runs rename|tag|rm`).
 
 Normal imports work (you can `from devices.psu.keysight_mp4300 import
 SasCurve` — see §9). Keep that power for data types and stdlib; don't reach
@@ -190,11 +197,17 @@ Rules that keep results clean:
   the full data on the artifact plane (§7).
 - **One limit, one place.** If the panel should show `4.9–5.1 V`, that range
   lives in `.in_range(4.9, 5.1)`, not in a comment or a `prompt` string.
-- **Name phases and measurements for what they are.** Each numeric measurement
-  streams as the telemetry channel `test.<phase>.<measurement>` (anything
-  outside `[A-Za-z0-9_-]` becomes `_`). The same names in two tests are the same
-  channel, and runs tell them apart — exactly like `psu1.1.voltage` across
-  sessions.
+- **Time is global; a measurement is a result, not a channel.** A channel is a
+  physical quantity at a place (`psu1.1.voltage`), and which test, run or port a
+  moment belongs to is said by the timeline. Each measurement lands on the
+  timeline as a pin of its run — value, units, limits and verdict, at the moment
+  it was set — and `guppi runs <id>` lists them all. Give phases and
+  measurements shared names across tests (`overcurrent`, `trip_a`) rather
+  than one test per port: the run says which port.
+- **Stream only real time series.** `htf.Measurement("ripple").stream()` also
+  plots a measurement on the channel `test.<measurement>` (anything outside
+  `[A-Za-z0-9_-]` becomes `_`). There is no phase in the name, so the same name
+  in any phase, test or run is one channel.
 
 ---
 
@@ -407,26 +420,22 @@ that raises `KeyError: 'v'` (§7). Persist each metric as its own series.
   `grid`'s row-major order (first axis outer), and the swept setpoints are already
   captured per row in `rows[i]["point"]`.
 
-### Sweep points stream to telemetry as they happen
+### Sweep points are recorded on the run as they happen
 
-`sweep` doesn't just return rows — as each point completes it **publishes
-every numeric key of the `measure()` return dict, and every key of the point
-dict, as live telemetry channels** (`test.<phase>.<name>`). Non-numeric
-values are skipped (bools become 0/1). History is saved while a recording is
-open, and **a run opens one for itself** (named `run <test> <id>`) if nobody is
-recording when it starts, closing it when the run ends — so **a stop at hour N
-leaves every point up to that instant in the record**, which makes telemetry,
-not a `capture_artifact` at the end of the phase, the right persistence for a
-long or stoppable sweep (the artifact only exists if the phase reaches the
-`capture_artifact` call). The point channels are listed in the catalog as they
-first stream, so a data view can bind them and `guppi query` can name them, and
-they stay listed after the run (like `test.<phase>.<measurement>`).
-Three consequences: keep helper/bookkeeping state **out** of point dicts
-(every key becomes a channel); **name commanded and measured values
-differently** (`vout_set` vs `vout`) — point and values keys share one
-channel namespace, and a collision silently interleaves setpoint and
-readback on a single channel; and use `capture_artifact` for what it's for
-— compact, uniform series you want joined to the run as artifacts, from
+`sweep` doesn't just return rows — as each point completes it **records the
+point and its `measure()` values on the run**, stamped with the moment it was
+measured (`points[]` in the run's record), and the data view shows each one as
+a pin of the run (`map: vin=40, p=120 → eff=0.9673`). The curves themselves are
+the devices' own channels (`psu1.1.voltage`) over the run's window, so nothing
+streams per point. History is saved while a recording is open, and **a run
+opens one for itself** (named `run <test> <id>`) if nobody is recording when it
+starts, closing it when the run ends — so **a stop at hour N leaves every point
+up to that instant in the record**, which makes the run, not a
+`capture_artifact` at the end of the phase, the right persistence for a long or
+stoppable sweep (the artifact only exists if the phase reaches the
+`capture_artifact` call). Keep helper/bookkeeping state **out** of point dicts
+(every key is written into each pin), and use `capture_artifact` for what it's
+for — compact, uniform series you want joined to the run as artifacts, from
 phases that complete.
 
 ### Long phases: the default timeout will kill your sweep
