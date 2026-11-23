@@ -293,7 +293,12 @@ if ($Cli -or $env:GUPPI_CLI -eq '1') {
         Run tar.exe @('-xzf', "$Tmp\guppi-src.tar.gz", '-C', "$Tmp\src", '--strip-components=1') 'extracting the release'
         Step 'the guppi CLI'
         UseWindowsProxyForUv
-        Run $uv @('tool', 'install', '--force', '--python', '3.12', "$Tmp\src\packages\cli") 'uv tool install'
+        # With the [preview] extra (guppi preview --png); without it if that can't install here.
+        & $uv tool install --force --python 3.12 "$Tmp\src\packages\cli[preview]" *> $null
+        if ($LASTEXITCODE -ne 0) {
+            Run $uv @('tool', 'install', '--force', '--python', '3.12', "$Tmp\src\packages\cli") 'uv tool install'
+            Write-Host '  (installed without PNG preview: its engine did not install here; guppi preview draws text)'
+        }
         $toolBin = (& $uv tool dir --bin).Trim()
         RestoreEnv 'HTTP_PROXY', 'HTTPS_PROXY'
         Run "$toolBin\guppi.exe" @('--help') 'guppi --help' | Out-Null

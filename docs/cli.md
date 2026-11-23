@@ -4,7 +4,10 @@ One `guppi` command everywhere. The bench installers build it for you; on any
 other machine, install just the CLI with one line
 (`curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | bash -s -- cli`,
 or `install.ps1 -Cli` on Windows); see [Getting started §6](getting-started.md#6-run-tests-from-your-terminal-optional).
-`guppi update` upgrades it.
+`guppi update` upgrades it to the latest release (and refreshes the skills,
+below). A CLI older than the hub it talks to says so on every command's first
+request, naming `guppi update`. A CLI that answers `guppi update` with
+"Nothing to update here" predates this: re-run its install line once.
 
 `guppi` on its own shows which hub it talks to, whether you're signed in, and
 your rigs, then the commands grouped as below (on a bench box with both the
@@ -176,8 +179,17 @@ guppi rack restart [--rig R]
 - `rack restart` turns every output off and restarts the rack running under
   `guppi up`, so built-in drivers and the rig config load fresh; the hub stays
   up. It works from any terminal, or remotely through the hub. Refused while a
-  test runs, if an output won't turn off, or if the rack wasn't started by
-  `guppi up` (then stop and start it yourself).
+  test runs, while an output is on (`--force` turns them off and restarts),
+  if an output won't turn off, or if the rack wasn't started by `guppi up`
+  (then stop and start it yourself).
+- Anything that stops or restarts a bench (`guppi update`, Ctrl-C in `guppi
+  up`, `rack restart`, an installer re-run) goes through one guard: it says
+  any test running, output on and client connected, refuses while a test runs
+  or an output is on (at a terminal it asks; `--force` skips the question),
+  and notes the stop on every rig's timeline with who and why. The hub that
+  comes back notes how long it was down and the release it came back as. A
+  CLI that loses the hub then says `hub restarting for update (by
+  xona@pts/0)` and waits for it, instead of failing.
 - Paths come from `guppi catalog <device> --all`. All of these need the hub to be
   allowed to actuate the bench (`guppi control allow`).
 
@@ -330,8 +342,9 @@ To set up Claude Code: `guppi skills install` copies six skills into
 files), `guppi-dashboard-design` (lay out a dashboard that reads well), `guppi-analysis` (query history and runs into pandas),
 `guppi-rig-setup` (declare a bench and troubleshoot it), `guppi-driver` (write a
 driver for an unsupported instrument) and `write-openhtf-test` (write, run and
-debug OpenHTF test scripts). They ship with the CLI, so re-run it after
-`guppi update`.
+debug OpenHTF test scripts). They ship with the CLI; `guppi update` refreshes
+them wherever `guppi skills install` put them (`--dir` places included), and
+`guppi skills update` does just that.
 
 ## Bench box
 
@@ -346,8 +359,11 @@ Both run in the foreground — Ctrl-C stops them. The hyphenated names
 `guppi-hub` / `guppi-rack` are the same programs.
 
 ```
-guppi update               # re-run the installer for whatever this box has;
-                           #   data untouched, rollback if the hub fails to start
+guppi update [--force]     # stop a bench running here under guppi up (the restart
+                           #   guard: refused under a run or an output on; asks),
+                           #   re-run the installer for whatever this box has;
+                           #   data untouched, rollback if the hub fails to start;
+                           #   then refresh the skills
 guppi uninstall [-y]       # remove hub/rack; data kept unless GUPPI_PURGE_DATA=1
 ```
 

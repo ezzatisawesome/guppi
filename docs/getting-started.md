@@ -327,8 +327,12 @@ curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.s
 
 It installs [uv](https://docs.astral.sh/uv/) if you don't have it (uv
 brings the Python 3.12 the CLI needs), installs the latest release's `guppi`
-for your user, and checks it runs. Nothing else is installed. Re-run it, or
-run `guppi update`, to upgrade. Then:
+for your user, and checks it runs. Nothing else is installed. To upgrade, run
+`guppi update`: it installs the latest release's CLI over this one, verified
+against the release's SHA256SUMS, and refreshes the skills wherever
+`guppi skills install` put them (re-running the line upgrades too, skills
+aside). The CLI warns when the bench runs
+a newer release than it does. Then:
 
 ```
 guppi use condor               # the bench's hostname (or IP); checked, then saved for every command
@@ -359,7 +363,13 @@ guppi update
 It fetches the current installer and re-runs it for whatever this box has —
 hub first, then rack. Your data (under `/var/lib/guppi` and in Postgres) is
 untouched; a hub that fails to start rolls back to the previous version.
-Re-running the installer by hand does exactly the same thing.
+Re-running the installer by hand does exactly the same thing. Then it
+refreshes the Claude Code skills wherever `guppi skills install` put them.
+
+On a laptop with just the CLI, `guppi update` installs the latest release's
+CLI over it the same way (on Windows, in a new window once `guppi` has
+exited). A CLI that says "Nothing to update here" predates this: re-run its
+install line above once.
 
 ## Pinning a version
 

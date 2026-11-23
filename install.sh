@@ -138,8 +138,14 @@ if [ "${1:-}" = cli ]; then
   tar -xzf "$TMPD/guppi-src.tar.gz" -C "$TMPD/src" --strip-components=1 --no-same-owner
 
   echo "── Installing the guppi CLI ──"
-  "$UV" tool install --force --python 3.12 "$TMPD/src/packages/cli" >/dev/null 2>"$TMPD/uv.log" \
-    || { cat "$TMPD/uv.log" >&2; fail "uv tool install failed (output above)"; }
+  # With the [preview] extra, so `guppi preview --png` draws (its engine has
+  # no Linux ARM wheel; the extra's marker leaves it out there). If the extra
+  # can't install here, the CLI goes in without it and says so.
+  if ! "$UV" tool install --force --python 3.12 "$TMPD/src/packages/cli[preview]" >/dev/null 2>"$TMPD/uv.log"; then
+    "$UV" tool install --force --python 3.12 "$TMPD/src/packages/cli" >/dev/null 2>"$TMPD/uv.log" \
+      || { cat "$TMPD/uv.log" >&2; fail "uv tool install failed (output above)"; }
+    echo "  (installed without PNG preview: its engine didn't install here; guppi preview draws text)"
+  fi
   BIN=$("$UV" tool dir --bin)
   "$BIN/guppi" --help >/dev/null || fail "$BIN/guppi was installed but doesn't run"
   echo "✓ guppi $GUPPI_REF installed: $BIN/guppi"
@@ -720,7 +726,14 @@ fi
 # Upgrades happen with the hub STOPPED — swapping the tree under a running
 # server is a coin flip. Keep the old tree (and its venv) as src.prev until
 # the new hub proves it starts; a failed upgrade rolls back.
-hub_answers && fail "the hub is running — stop it first (Ctrl-C in the terminal running guppi hub) and re-run."
+# What stopping it would cut short, from the hub's own restart guard
+# (GET /bench/activity: runs, outputs on, who is connected), so the person
+# re-running this knows who to ask. `guppi update` stops an idle bench itself.
+if hub_answers; then
+  busy=$(curl -fsS -m 5 'http://localhost:8000/bench/activity?text=1' 2>/dev/null || true)
+  [ -n "$busy" ] && printf '%s\n' "$busy" | sed 's/^/   · /' >&2
+  fail "the hub is running — stop it first (Ctrl-C in the terminal running guppi up), or run guppi update, which stops an idle bench for you, and re-run."
+fi
 UPGRADING=0
 if [ -d "$GUPPI_HOME/src" ]; then
   UPGRADING=1
