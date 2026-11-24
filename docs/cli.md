@@ -2,7 +2,7 @@
 
 One `guppi` command everywhere. The bench installers build it for you; on any
 other machine, install just the CLI with one line
-(`curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | bash -s -- cli`,
+(`curl -fsSL https://github.com/ezzatisawesome/guppi/releases/latest/download/install.sh | bash -s -- cli`,
 or `install.ps1 -Cli` on Windows); see [Getting started §6](getting-started.md#6-run-tests-from-your-terminal-optional).
 `guppi update` upgrades it to the latest release (and refreshes the skills,
 below). A CLI older than the hub it talks to says so on every command's first

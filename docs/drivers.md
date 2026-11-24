@@ -1,10 +1,12 @@
 # Instrument drivers
 
-Guppi ships a large driver library — 200+ instruments across power supplies,
-electronic loads, DMMs, oscilloscopes, spectrum / network / signal analyzers,
-SMUs, function generators, lock-ins, magnet controllers, motion, photonics,
-temperature, and vacuum. When your instrument isn't covered — or you want the
-rack to read a custom board — you write a driver: one Python class.
+Guppi ships a large driver library: over 2,200 instrument models from more
+than 70 makers, across power supplies, electronic loads, DMMs, oscilloscopes,
+spectrum / network / signal analyzers, SMUs, function generators, lock-ins,
+magnet controllers, motion, photonics, temperature, and vacuum. Check yours by
+model number at [guppidev.com/instruments](https://guppidev.com/instruments).
+When your instrument isn't covered — or you want the rack to read a custom
+board — you write a driver: one Python class.
 
 ## How the rack finds drivers
 

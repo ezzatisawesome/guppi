@@ -82,6 +82,17 @@ pressure > 300                             # 1 or 0 — good for alarms
 Operators `+ - * / % ^` and comparisons, plus the usual math functions
 (`sqrt`, `abs`, `min`, `max`, `log`, trig, …) and constants `pi`, `e`.
 
+A formula's unit comes from its channels: volts times amps reads W. When
+you scale a sensor, the channels can't know what you scaled it to, so write
+the unit after the formula in square brackets:
+
+```
+(daq1.3.voltage - 1.25) / 0.005 [°C]       # thermocouple amplifier, 5 mV/°C
+daq1.5.voltage * 10 [N]                    # load cell, 100 mV per newton
+```
+
+Readouts and plot axes then say °C and N instead of V.
+
 ## P&ID diagrams
 
 Draw your plumbing on the same canvas. Drop ISA symbols — `tank`, `pump`,

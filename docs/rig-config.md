@@ -27,6 +27,7 @@ rig:
 | `safety` | L1 watchdog abort-limits (see below). | none |
 | `ethernet` | Bring the rack onto networked instruments' subnets (see below). | enabled |
 | `auto_discover_instruments` | Run the startup VISA/LAN scan and merge in undeclared instruments. | `true` |
+| `network_scan` | `listen`: a scan lists instruments on the rack's network only from what they announce (LXI mDNS: maker, model, serial). It never connects to them, so other people's instruments on a shared lab LAN are left alone. Type an address into Scan to ask that one host. `probe`: sweep the network and send `*IDN?` to every host, for a LAN that belongs to the rack. The dedicated instrument port is probed either way. | `listen` |
 | `drivers` | Filesystem paths to **custom** driver code (see below). | `[]` |
 | `reconnect_interval` | Seconds between retries for a device that failed to connect at boot. Floored at 0.25 s — a 0 here once burned a CPU core per dark instrument. | `5.0` |
 | `connect_budget_s` | How long boot waits for devices before handing the stragglers to the background reconnect loop. `0` disables the deadline. | `30.0` |

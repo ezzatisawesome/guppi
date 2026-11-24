@@ -18,14 +18,19 @@ rack's settings live in %USERPROFILE%\.guppi, as on Linux.
     data\       the database cluster, NATS's store, run artifacts
 
 Re-running upgrades in place (stop the bench first); a failed upgrade rolls
-back. Options: -Ref <tag>, -SrcTarball <path> (offline), -Uninstall [-Purge].
+back. Options: -Ref <tag>, -SrcTarball <path> (offline), -Uninstall [-Purge],
+-Network (let other computers on your network open the dashboard, and a rack on
+another computer link to this hub; Windows then asks once to let Guppi through
+its firewall), -LocalOnly (back to this PC only: a linked remote rack drops off).
 `iex` passes none, so to give one, run the script as a script block:
 
     & ([scriptblock]::Create((irm <the URL above>))) -Uninstall
 
 The hub needs ports 8000, 4222, 9222, 3010 and 55432: if another program
 holds one, the installer names it and stops before changing anything. The
-rack needs 8080 (RACK_PORT moves it), which only gets a warning here.
+rack needs 8080 (RACK_PORT moves it), which only gets a warning here. Every one
+listens on this PC only (127.0.0.1) unless the bench was installed with
+-Network, so a first install raises no firewall prompt.
 
 Just the guppi command (a laptop that drives a bench from elsewhere), no bench:
 
@@ -42,7 +47,9 @@ param(
     [string]$UiTarball = $env:GUPPI_UI_TARBALL,
     [switch]$Uninstall,
     [switch]$Purge,
-    [switch]$Cli
+    [switch]$Cli,
+    [switch]$Network,
+    [switch]$LocalOnly
 )
 # `irm ... | iex` runs a script in the caller's own scope, so the install runs
 # in a child one: its preferences, its helpers and the database passwords it
@@ -53,6 +60,10 @@ $ProgressPreference = 'SilentlyContinue'  # the progress bar makes downloads 10x
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
 $Repo = 'ezzatisawesome/guppi'
+# Windows' own tar (bsdtar): a Git for Windows or MSYS tar earlier on PATH
+# reads "C:\..." as a remote host and the extract fails.
+$Tar = Join-Path $env:SystemRoot 'System32\tar.exe'
+if (-not (Test-Path $Tar)) { $Tar = 'tar.exe' }
 $Root = Join-Path $env:LOCALAPPDATA 'Guppi'
 $Bin, $Etc, $Data = "$Root\bin", "$Root\etc", "$Root\data"
 $PgDist, $PgData = "$Root\pgsql", "$Root\data\pg"
@@ -71,7 +82,7 @@ $PostgrestSha256 = '17f595b0d8dd37473d0231417dea07c5ac9f791282ff5b017fae51ff29e5
 # Environment variables are the process's, not the scope's, and under `iex` the
 # process is the user's PowerShell: the ones set below are put back at the end.
 $SavedEnv = @{}
-foreach ($name in 'UV_PYTHON', 'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_SYSTEM_CERTS', 'UV_NATIVE_TLS',
+foreach ($name in 'UV_PYTHON', 'UV_PYTHON_PREFERENCE', 'UV_PYTHON_INSTALL_DIR', 'UV_CACHE_DIR', 'UV_SYSTEM_CERTS', 'UV_NATIVE_TLS',
                   'HTTP_PROXY', 'HTTPS_PROXY', 'PGPASSWORD', 'PGOPTIONS') {
     $SavedEnv[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
 }
@@ -79,6 +90,11 @@ try {
 # One interpreter for every venv, x64 everywhere (see above).
 $env:UV_PYTHON = 'cpython-3.12-windows-x86_64-none'
 $env:UV_PYTHON_INSTALL_DIR = "$Root\python"
+# Only a Python uv downloaded into the bench's own folder: never one another
+# program registered (PEP 514). A Python that belongs to someone else's tools
+# leaves the bench broken the day that program moves or removes it (a dev
+# toolchain's 3.12 registered under HKCU, say).
+$env:UV_PYTHON_PREFERENCE = 'only-managed'
 $env:UV_CACHE_DIR = "$Root\cache\uv"
 # A company network that inspects TLS re-signs every site with its own root CA,
 # which Windows trusts and PowerShell's downloads (steps 1-3) use. uv trusts only
@@ -214,6 +230,34 @@ function RestoreEnv([string[]]$names) {
     foreach ($name in $names) { [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process') }
 }
 
+# Rename a folder of ours, waiting out a moment's lock: Windows refuses while
+# any program has a file open inside it, and an antivirus scan of a fresh tree
+# or Explorer showing it is enough. Fails with what to close, not a raw
+# "Access to the path is denied". One rename, whole or not at all: Move-Item
+# moved what it could and left the held file behind (windows-install CI,
+# 2026-11-24), and a half src.prev then passed for the last good tree.
+function MoveDir([string]$from, [string]$to) {
+    for ($i = 1; $i -le 10; $i++) {
+        try { [IO.Directory]::Move($from, $to); return }
+        catch { if ($i -eq 10) { break } ; Start-Sleep -Milliseconds 500 }
+    }
+    Fail "couldn't move $from (a program has a file open in it: an Explorer window, a terminal whose folder is in it, an editor, antivirus). Close it, then re-run the installer."
+}
+
+# Put the last good release back after a failed upgrade: the half-built tree is
+# what bin\guppi.exe runs from, so leaving it there broke guppi itself, and with
+# it the `guppi update` that would have fixed things. $true once it is back.
+function RestorePrevious {
+    if (-not (Test-Path "$Root\src.prev")) { return $false }
+    Remove-Item -Recurse -Force "$Root\src", "$Root\ui" -ErrorAction SilentlyContinue
+    if (Test-Path "$Root\src") { return $false }  # still held open: the next run recovers it
+    [IO.Directory]::Move("$Root\src.prev", "$Root\src")
+    if (Test-Path "$Root\ui.prev") { [IO.Directory]::Move("$Root\ui.prev", "$Root\ui") }
+    $exe = "$Root\src\packages\cli\.venv\Scripts\guppi.exe"
+    if (Test-Path $exe) { Copy-Item -Force $exe "$Bin\guppi.exe" -ErrorAction SilentlyContinue }
+    return $true
+}
+
 function Secret {
     $bytes = New-Object byte[] 24
     [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
@@ -223,6 +267,33 @@ function Secret {
 function Run([string]$exe, [string[]]$argv, [string]$what) {
     & $exe @argv
     if ($LASTEXITCODE -ne 0) { Fail "$what failed (exit $LASTEXITCODE)" }
+}
+
+# A native command whose chatter a customer doesn't need (initdb ends "Success.
+# You can now start the database server using: pg_ctl ..."): its output is
+# shown only when it fails. Not for anything that leaves a process running.
+function RunHushed([string]$exe, [string[]]$argv, [string]$what) {
+    $ErrorActionPreference = 'Continue'  # 5.1 turns each stderr line into an error record
+    $out = @(& $exe @argv 2>&1 | ForEach-Object { "$_" })
+    if ($LASTEXITCODE -ne 0) {
+        $out | ForEach-Object { Write-Host "   $_" }
+        Fail "$what failed (exit $LASTEXITCODE)"
+    }
+}
+
+# A native command that leaves a server running (pg_ctl start), run without
+# handing it a pipe. Under a capture (`irm ... | iex *>&1 | Tee-Object log`)
+# PowerShell reads a native command's output through a pipe until it closes;
+# the postgres pg_ctl starts inherits that pipe and keeps it open, so the
+# install stalls after "server started" with no message. Started this way it
+# shares the console and nothing waits on it.
+function RunDetached([string]$exe, [string[]]$argv, [string]$what) {
+    $psi = New-Object Diagnostics.ProcessStartInfo $exe
+    $psi.Arguments = @($argv | ForEach-Object { '"' + $_ + '"' }) -join ' '
+    $psi.UseShellExecute = $false
+    $p = [Diagnostics.Process]::Start($psi)
+    $p.WaitForExit()
+    if ($p.ExitCode -ne 0) { Fail "$what failed (exit $($p.ExitCode))" }
 }
 
 # A native command's exit code, its output discarded. Windows PowerShell turns
@@ -258,7 +329,7 @@ function UserPath([string]$dir, [bool]$add) {
 if ($Cli -or $env:GUPPI_CLI -eq '1') {
     if (Test-Path "$Root\src\packages\cli") { Fail 'this machine has a Guppi bench, which already has guppi: update it with guppi update' }
     # uv's own defaults, not the bench's private Python and cache.
-    Remove-Item Env:UV_PYTHON_INSTALL_DIR, Env:UV_CACHE_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:UV_PYTHON_INSTALL_DIR, Env:UV_CACHE_DIR, Env:UV_PYTHON_PREFERENCE -ErrorAction SilentlyContinue
     $Tmp = Join-Path ([IO.Path]::GetTempPath()) ("guppi-cli-" + [guid]::NewGuid())
     New-Item -ItemType Directory $Tmp | Out-Null
     try {
@@ -290,12 +361,12 @@ if ($Cli -or $env:GUPPI_CLI -eq '1') {
             VerifyRelease "$Tmp\guppi-src.tar.gz" 'guppi-src.tar.gz'
         }
         New-Item -ItemType Directory "$Tmp\src" | Out-Null
-        Run tar.exe @('-xzf', "$Tmp\guppi-src.tar.gz", '-C', "$Tmp\src", '--strip-components=1') 'extracting the release'
+        Run $Tar @('-xzf', "$Tmp\guppi-src.tar.gz", '-C', "$Tmp\src", '--strip-components=1') 'extracting the release'
         Step 'the guppi CLI'
         UseWindowsProxyForUv
         # With the [preview] extra (guppi preview --png); without it if that can't install here.
-        & $uv tool install --force --python 3.12 "$Tmp\src\packages\cli[preview]" *> $null
-        if ($LASTEXITCODE -ne 0) {
+        # Quietly: uv's progress lines on stderr would end the install under 'Stop'.
+        if ((Quietly $uv @('tool', 'install', '--force', '--python', '3.12', "$Tmp\src\packages\cli[preview]")) -ne 0) {
             Run $uv @('tool', 'install', '--force', '--python', '3.12', "$Tmp\src\packages\cli") 'uv tool install'
             Write-Host '  (installed without PNG preview: its engine did not install here; guppi preview draws text)'
         }
@@ -319,13 +390,22 @@ if ($Uninstall) {
     $ours = @('src', 'src.prev', 'ui', 'ui.prev', 'bin', 'postgrest', 'python', 'cache', 'pgsql')
     if ($Purge) { $ours += 'etc', 'data' }
     foreach ($d in $ours) { Remove-Item -Recurse -Force "$Root\$d" -ErrorAction SilentlyContinue }
+    if (-not $Purge) {
+        # Kept data keeps only the one file that opens it (db.secret). The rest
+        # of etc\ is rewritten by a reinstall, and hub.env and postgrest.conf
+        # carry the database passwords in plain text; a kept version would make
+        # a later CLI-only install report this release.
+        foreach ($f in @('hub.env', 'postgrest.conf', 'version')) {
+            Remove-Item -Force "$Etc\$f" -ErrorAction SilentlyContinue
+        }
+    }
     $stuck = @($ours | Where-Object { Test-Path "$Root\$_" })
     if ($stuck) {
         Fail "couldn't delete $(($stuck | ForEach-Object { "$Root\$_" }) -join ', '): close whatever has files open there, then uninstall again."
     }
     UserPath $Bin $false
     if (-not $Purge) {
-        Write-Host "Uninstalled. Your data stays in $Data and $RackHome (-Purge deletes the data in $Root)."
+        Write-Host 'Uninstalled.'
     } elseif ($others = @(Get-ChildItem -Force $Root -ErrorAction SilentlyContinue)) {
         Write-Host "Uninstalled, and deleted the database and settings in $Root."
         Note "$Root itself stays: it also holds files Guppi didn't put there ($(($others | Select-Object -First 3 -ExpandProperty Name) -join ', '))."
@@ -333,11 +413,26 @@ if ($Uninstall) {
         Remove-Item -Force $Root -ErrorAction SilentlyContinue
         Write-Host "Uninstalled, and deleted the database and settings in $Root."
     }
+    # Say everything that stays, by name (dashboards, firewall rules), with one
+    # spelling of purge, one a PowerShell user can paste.
+    $workspace = if ($env:GUPPI_WORKSPACE_PATH) { $env:GUPPI_WORKSPACE_PATH } else { "$env:USERPROFILE\guppi-workspace" }
+    $kept = @(@(
+        $(if (-not $Purge) { "the database ($Data) and the password file that opens it ($Etc\db.secret)" }),
+        $(if (Test-Path $RackHome) { "the rig settings ($RackHome)" }),
+        $(if (Test-Path $workspace) { "your dashboards and data views ($workspace)" })
+    ) | Where-Object { $_ })
+    if ($kept) { Write-Host "Kept: $($kept -join ', ')." }
+    Note 'Windows Firewall may still list nats-server and postgrest if its prompt was answered: remove them under Windows Security > Firewall & network protection > Allow an app through firewall.'
+    if (-not $Purge) {
+        # `guppi` is gone now: the installer itself is what deletes the rest.
+        Write-Host 'To delete the database too, paste:'
+        Write-Host '  & ([scriptblock]::Create((irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1))) -Uninstall -Purge'
+    }
     return
 }
 
 # ── Preflight ────────────────────────────────────────────────────────────────
-if (-not (Get-Command tar.exe -ErrorAction SilentlyContinue)) {
+if (-not (Get-Command $Tar -ErrorAction SilentlyContinue)) {
     Fail 'tar.exe is missing: Guppi needs Windows 10 version 1803 or later.'
 }
 if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
@@ -384,20 +479,27 @@ if ($SrcTarball) {
 }
 
 $upgrading = Test-Path "$Root\src"
+# Only a finished install (it wrote etc\version last) is worth rolling back to:
+# after one that stopped part-way, src.prev is half a tree.
+$canRollBack = $upgrading -and (Test-Path "$Etc\version")
 if ($upgrading) {
-    $prevRef = if (Test-Path "$Etc\version") { Get-Content "$Etc\version" } else { 'unknown' }
-    Note "upgrading from $prevRef"
+    $prevRef = if (Test-Path "$Etc\version") { Get-Content "$Etc\version" } else { 'the last install' }
+    if (Test-Path "$Etc\version") { Note "upgrading from $prevRef" }
+    else { Note 'finishing an earlier install that stopped part-way' }
     if (Test-Path "$Root\src.prev") {
         Note '(recovering from an interrupted update: keeping the last good tree)'
         Remove-Item -Recurse -Force "$Root\src", "$Root\ui" -ErrorAction SilentlyContinue
+    } elseif ($canRollBack) {
+        MoveDir "$Root\src" "$Root\src.prev"
+        if (Test-Path "$Root\ui") { MoveDir "$Root\ui" "$Root\ui.prev" }
     } else {
-        Move-Item "$Root\src" "$Root\src.prev"
-        if (Test-Path "$Root\ui") { Move-Item "$Root\ui" "$Root\ui.prev" }
+        # Half a tree from a run that stopped: nothing in it to go back to.
+        Remove-Item -Recurse -Force "$Root\src", "$Root\ui" -ErrorAction SilentlyContinue
     }
 }
 New-Item -ItemType Directory -Force "$Root\src", "$Root\ui" | Out-Null
-Run tar.exe @('-xzf', "$Tmp\guppi-src.tar.gz", '-C', "$Root\src", '--strip-components=1') 'extracting the release'
-if ($UiTarball) { Run tar.exe @('-xzf', $UiTarball, '-C', "$Root\ui") 'extracting the UI' }
+Run $Tar @('-xzf', "$Tmp\guppi-src.tar.gz", '-C', "$Root\src", '--strip-components=1') 'extracting the release'
+if ($UiTarball) { Run $Tar @('-xzf', $UiTarball, '-C', "$Root\ui") 'extracting the UI' }
 $Agent, $Cli, $Rack = "$Root\src\packages\agent", "$Root\src\packages\cli", "$Root\src\packages\rack"
 
 # ── 2. Tools: uv, nats-server, PostgREST ─────────────────────────────────────
@@ -472,8 +574,8 @@ if (Test-Path $secretFile) {
 if (-not (Test-Path "$PgData\PG_VERSION")) {
     $pw = "$Tmp\pw"
     WriteText $pw $secret.postgres  # not Set-Content -NoNewline: on 5.1 that wrote no file at all
-    Run "$PgBin\initdb.exe" @('-D', $PgData, '-U', 'postgres', "--pwfile=$pw", '-E', 'UTF8',
-                              '--no-locale', '--auth=scram-sha-256') 'creating the database cluster'
+    RunHushed "$PgBin\initdb.exe" @('-D', $PgData, '-U', 'postgres', "--pwfile=$pw", '-E', 'UTF8',
+                                    '--no-locale', '--auth=scram-sha-256') 'creating the database cluster'
     Remove-Item $pw
     Add-Content -Encoding ascii "$PgData\postgresql.conf" @"
 
@@ -506,7 +608,7 @@ RestoreEnv 'HTTP_PROXY', 'HTTPS_PROXY'  # the hub, started at step 7, gets the s
 # ── 5. Database: roles, schema ───────────────────────────────────────────────
 Step '5/7 Database'
 $env:PGPASSWORD = $secret.postgres
-Run "$PgBin\pg_ctl.exe" @('-D', $PgData, '-l', "$Data\pg-install.log", '-w', 'start') 'starting PostgreSQL'
+RunDetached "$PgBin\pg_ctl.exe" @('-D', $PgData, '-l', "$Data\pg-install.log", '-w', '-s', 'start') "starting PostgreSQL (its log: $Data\pg-install.log)"
 try {
     $psql = @('-h', '127.0.0.1', '-p', "$PgPort", '-U', 'postgres', '-v', 'ON_ERROR_STOP=1', '-qAt')
     $hasDb = & "$PgBin\psql.exe" @psql -d postgres -c "SELECT 1 FROM pg_database WHERE datname='guppi'"
@@ -533,6 +635,40 @@ ALTER ROLE guppi_authenticator PASSWORD '$($secret.authenticator)';
 
 # ── 6. Configuration and commands ────────────────────────────────────────────
 Step '6/7 Configuration and commands'
+# Who can open the dashboard: this PC only, unless asked. Listening on the
+# network made Windows ask about the firewall in the middle of a first install
+# ("Publisher Unknown"), and an unanswered prompt left Block rules while guppi
+# up still printed a network address; NATS is
+# anonymous, so on the network anyone there could reach the bench's broker.
+# -Network opens it to other computers, -LocalOnly closes it again; a re-run
+# keeps the last choice, and a bench installed before this choice existed
+# (no GUPPI_HUB_HOST in hub.env) keeps serving the network as it did.
+$HubHost = '127.0.0.1'
+if ($Network) { $HubHost = '0.0.0.0' }
+elseif (-not $LocalOnly -and (Test-Path "$Etc\hub.env")) {
+    $was = Select-String -Path "$Etc\hub.env" -Pattern '^GUPPI_HUB_HOST="?([^"]*)"?' | Select-Object -First 1
+    $HubHost = if ($was) { $was.Matches[0].Groups[1].Value } else { '0.0.0.0' }
+    if ($HubHost -notin @('127.0.0.1', '0.0.0.0')) { $HubHost = '127.0.0.1' }
+}
+$Shared = $HubHost -eq '0.0.0.0'
+# The broker's own settings, with where it listens: the agent's dev config
+# (packages/agent/infrastructure/nats/nats.dev.conf) binds every interface.
+@"
+# NATS for this bench, written by the installer. Listens on $HubHost
+# (re-run the installer with -Network or -LocalOnly to change it).
+host: $HubHost
+port: 4222
+
+websocket {
+  host: $HubHost
+  port: 9222
+  no_tls: true
+}
+
+jetstream {
+  store_dir: ".nats-data"
+}
+"@ | ForEach-Object { WriteText "$Etc\nats.conf" $_ }
 # Read by guppi-hub (guppi_cli/hub.py) for where everything is, and by the agent.
 @"
 # Guppi hub. Local mode is an explicit opt-in (never inferred).
@@ -540,8 +676,10 @@ GUPPI_BACKEND="local"
 DATABASE_URL="postgresql://guppi:$($secret.guppi)@127.0.0.1:$PgPort/guppi"
 GUPPI_DATA_DIR="$Data"
 GUPPI_UI_DIR="$Root\ui"
+GUPPI_HUB_HOST="$HubHost"
+NATS_URL="nats://127.0.0.1:4222"
 GUPPI_NATS_SERVER="$Bin\nats-server.exe"
-GUPPI_NATS_CONF="$Agent\infrastructure\nats\nats.dev.conf"
+GUPPI_NATS_CONF="$Etc\nats.conf"
 GUPPI_POSTGREST="$Pgrst\postgrest.exe"
 GUPPI_POSTGREST_CONF="$Etc\postgrest.conf"
 GUPPI_AGENT_DIR="$Agent"
@@ -555,7 +693,7 @@ GUPPI_PG_PORT="$PgPort"
 db-uri = "postgres://guppi_authenticator:$($secret.authenticator)@127.0.0.1:$PgPort/guppi"
 db-schemas = "public"
 db-anon-role = "web_anon"
-server-host = "0.0.0.0"
+server-host = "$HubHost"
 server-port = 3010
 db-max-rows = 10000
 db-pool = 8
@@ -567,23 +705,14 @@ if (-not (Test-Path "$RackHome\rig_config.yml") -and (Test-Path "$Rack\rig_confi
     Copy-Item "$Rack\rig_config.yml" "$RackHome\rig_config.yml"
 }
 
-# Paths in the .cmd shims are relative to the shim (%~dp0) or come from the
-# environment, never spelled out: cmd.exe reads a batch file in the console's
-# code page, which would garble a non-ASCII user name.
-WriteText "$Bin\guppi-hub.cmd" @"
-@echo off
-"%~dp0..\src\packages\cli\.venv\Scripts\python.exe" -m guppi_cli.hub "%~dp0..\etc\hub.env"
-"@
-# The rack falls back to a rig_config.yml in its working directory, which is
-# the release tree: pin the operator's instead. Source tree or bytecode build.
-WriteText "$Bin\guppi-rack.cmd" @"
-@echo off
-if not defined RIG_CONFIG_PATH set "RIG_CONFIG_PATH=%USERPROFILE%\.guppi\rig_config.yml"
-cd /d "%~dp0..\src\packages\rack"
-set "MAIN=src\main.py"
-if not exist "%MAIN%" set "MAIN=src\main.pyc"
-".venv\Scripts\python.exe" "%MAIN%" %*
-"@
+# The .cmd shims only point at guppi: how the hub and the rack start (their
+# interpreter, folder and defaults) is written once, in the CLI
+# (guppi_cli/host/install.py windows_launch), which `guppi up` uses too. A
+# relative path (%~dp0), so a non-ASCII user name isn't garbled by cmd.exe's
+# code page; `guppi` is guppi.exe, or the guppi.cmd fallback below.
+foreach ($svc in 'guppi-hub', 'guppi-rack') {
+    WriteText "$Bin\$svc.cmd" "@echo off`r`n`"%~dp0guppi`" _service $svc %*`r`n"
+}
 # guppi itself is an .exe, not a shim: a batch file asks "Terminate batch job
 # (Y/N)?" after every Ctrl-C. A venv's console script embeds its interpreter's
 # absolute path, so a copy runs from bin\ without the venv's python.exe on PATH.
@@ -597,10 +726,14 @@ UserPath $Bin $true
 
 # ── 7. Check it starts ───────────────────────────────────────────────────────
 Step '7/7 Starting the hub once to check it answers'
-# The hub serves the dashboard to the LAN, so Windows asks the first time it listens.
-Note 'Windows may ask to let python, nats-server and postgrest through its firewall.'
-Note 'Allow on Private networks to open the dashboard from other computers (not Public:'
-Note 'there is no login on your own network). Cancel keeps the dashboard to this PC.'
+if ($Shared) {
+    # Asked for with -Network: Windows asks the first time the hub listens on the
+    # network. Current Windows 11 asks one question covering every network
+    # (docs/public/getting-started.md says when to choose which).
+    Note 'Windows will ask to let python, nats-server and postgrest through its firewall.'
+    Note 'Allow lets other computers on this network open the dashboard; Guppi has no login'
+    Note 'there, so allow it only on a PC that stays on your bench network. Cancel keeps it to this PC.'
+}
 $hub = Start-Process -PassThru -WindowStyle Hidden -FilePath "$Cli\.venv\Scripts\python.exe" `
     -ArgumentList @('-m', 'guppi_cli.hub', "`"$Etc\hub.env`"") `
     -RedirectStandardOutput "$Tmp\hub.out" -RedirectStandardError "$Tmp\hub.err"
@@ -616,11 +749,7 @@ $null = Quietly "$PgBin\pg_ctl.exe" @('-D', $PgData, '-m', 'fast', '-w', 'stop')
 
 if (-not $ok) {
     Get-Content "$Tmp\hub.out", "$Tmp\hub.err" -Tail 25 -ErrorAction SilentlyContinue | Write-Host
-    if ($upgrading -and (Test-Path "$Root\src.prev")) {
-        Remove-Item -Recurse -Force "$Root\src", "$Root\ui" -ErrorAction SilentlyContinue
-        Move-Item "$Root\src.prev" "$Root\src"
-        if (Test-Path "$Root\ui.prev") { Move-Item "$Root\ui.prev" "$Root\ui" }
-        Copy-Item -Force "$Cli\.venv\Scripts\guppi.exe" "$Bin\guppi.exe"
+    if ($canRollBack -and (RestorePrevious)) {
         Fail "the upgraded hub didn't start, so the previous version ($prevRef) is back. Its log is above."
     }
     Fail "the hub didn't answer on :8000 within 60 s. Its log is above."
@@ -631,6 +760,15 @@ Remove-Item -Recurse -Force "$Root\src.prev", "$Root\ui.prev" -ErrorAction Silen
 Remove-Item -Force "$Bin\postgrest.exe" -ErrorAction SilentlyContinue
 Set-Content -Encoding ascii "$Etc\version" $Ref
 
+} catch {
+    # Any failure after the old tree moved aside (a uv sync behind a proxy, a
+    # locked file, the schema), not just a hub that won't start: put it back.
+    $restored = $false
+    if ($canRollBack) { try { $restored = RestorePrevious } catch { } }  # never mask the first error
+    if ($restored) {
+        Write-Host "   The previous version ($prevRef) is back, so guppi still works." -ForegroundColor Yellow
+    }
+    throw
 } finally {
     Remove-Item -Recurse -Force $Tmp -ErrorAction SilentlyContinue
 }
@@ -639,9 +777,13 @@ Write-Host ''
 Write-Host "Guppi $Ref is installed." -ForegroundColor Green
 Write-Host '  Open a NEW terminal (so it sees the updated PATH), then:'
 Write-Host '    guppi up        start the bench (hub + rack); Ctrl-C stops it'
-Write-Host '    guppi hub       or just the hub;  guppi rack  just the rack'
-Write-Host '  Dashboard: http://localhost:8000 while it runs.'
-Write-Host "  Instruments are set up in $RackHome\rig_config.yml (or from the dashboard)."
+Write-Host '  Then open http://localhost:8000 and plug in your instruments: the dashboard offers to add them.'
+if ($Shared) {
+    Write-Host '  Other computers on this network can open it too (guppi up prints the address).'
+} else {
+    Write-Host '  Only this PC can open it. For other computers too, re-run the installer with -Network.'
+}
+Write-Host '  Setup guide: https://guppidev.com/setup'
 
 } finally {
     foreach ($name in $SavedEnv.Keys) { [Environment]::SetEnvironmentVariable($name, $SavedEnv[$name], 'Process') }

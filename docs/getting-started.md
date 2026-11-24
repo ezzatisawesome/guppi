@@ -24,7 +24,7 @@ old laptop, or a VM on the bench network all work the same.
 ## 2. Install Guppi
 
 ```
-curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
+curl -fsSL https://github.com/ezzatisawesome/guppi/releases/latest/download/install.sh | sudo bash
 ```
 
 One command, ~2–4 minutes on a Pi. It installs PostgreSQL (a system service),
@@ -45,9 +45,10 @@ irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1
 ```
 
 It installs the same hub and rack for your user only, in
-`%LOCALAPPDATA%\Guppi`, with a private PostgreSQL on `127.0.0.1` (nothing
-system-wide, no services), and adds `guppi` to your PATH: open a new terminal
-afterwards. The rack's settings live in `%USERPROFILE%\.guppi`, as on Linux.
+`%LOCALAPPDATA%\Guppi`, with a private PostgreSQL (nothing system-wide, no
+services), and adds `guppi` to your PATH: open a new terminal afterwards.
+Everything listens on this PC only, so there is no firewall prompt; to open
+the dashboard from other computers too, see "Other computers" below. The rack's settings live in `%USERPROFILE%\.guppi`, as on Linux.
 Re-run it to upgrade. `guppi uninstall` removes it and keeps your data; set
 `$env:GUPPI_PURGE_DATA = '1'` first to delete the data too.
 
@@ -57,18 +58,17 @@ Step by step, on a new PC:
    `PS C:\WINDOWS\system32>`, that's an administrator window: close it and
    open a normal one.
 2. **Paste the command above.** The first run takes a few minutes, because it
-   downloads Python and PostgreSQL. It ends with "Guppi … is installed". At
-   its last step, Windows asks about the firewall (see below).
+   downloads Python and PostgreSQL. It ends with "Guppi … is installed".
 3. **Open a new PowerShell window from the Start menu**, and run `guppi up`.
    A window that was already open still has the old PATH, and answers
    "'guppi' is not recognized". That includes a terminal inside another app,
    such as an editor.
-4. **Open the address `guppi up` prints** (`http://<this PC's address>:8000`),
-   or `http://localhost:8000` on this PC. Another computer or a phone on the
-   same network uses the printed address, if you allowed the firewall prompt.
+4. **Open the address `guppi up` prints**: `http://localhost:8000`.
 5. **Plug in your instruments.** The dashboard offers to add what the rack
-   finds: choose **Add to rig**. USB instruments need a VISA driver first
-   (see below).
+   finds: choose **Add to rig**, and the Instruments page opens. USB
+   instruments need a VISA driver first (see below). Not sure yours is
+   supported? Check it by model number at
+   [guppidev.com/instruments](https://guppidev.com/instruments).
 6. **To keep readings, record them.** Watching live doesn't save readings
    (the log and notes are always kept). Open a dashboard (Pages ▸ New ▸
    Dashboard), and press **Record** at the top. Press it again to stop. A
@@ -80,17 +80,34 @@ It needs ports 8000, 4222, 9222, 3010 and 55432. If another program holds one,
 the installer names that program and stops before changing anything: stop it
 and re-run. Port 8080, the rack's, only gets a warning.
 
-Its last step starts the hub once, and Windows asks whether `python`,
-`nats-server` and `postgrest` may accept connections from your network. That
-answer decides who else can open the dashboard:
+**Other computers.** The dashboard is on this PC only until you ask for more.
+To open it from another computer or a phone on the same network, stop the
+bench and re-run the installer with `-Network`:
 
-- **Allow on Private networks** (Windows asks for administrator approval) to
-  open it from other computers on your bench network. Windows calls a network
-  it hasn't seen before Public: for one you trust, set it to Private first
+```
+& ([scriptblock]::Create((irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1))) -Network
+```
+
+Its last step starts the hub once, and Windows asks whether `python`,
+`nats-server` and `postgrest` may accept connections from your network.
+Guppi has no login on your network, so anyone on it could use your
+instruments: do this only on a PC that stays on your bench network.
+
+- **Allow** opens it to other computers. Current Windows 11 asks one question,
+  "Do you want to allow public and private networks to access this app?", so
+  Allow covers every network this PC joins, public Wi-Fi included.
+- Older Windows shows a **Private** and a **Public** box instead: tick only
+  Private (it asks for administrator approval). Windows calls a network it
+  hasn't seen before Public: for one you trust, set it to Private first
   (Settings ▸ Network & internet ▸ your network ▸ Network profile type).
-- **Don't tick Public networks.** Guppi has no login on your own network, so
-  anyone on a café or conference Wi-Fi could use your instruments.
-- **Cancel** keeps the dashboard to this PC.
+- **Cancel** keeps it to this PC after all.
+
+`guppi up` then prints this PC's network address. To go back to this PC only,
+re-run the installer with `-LocalOnly`. A rack on another computer (a Pi wired
+to more instruments) reaches this hub over the network too: while one is
+linked here, keep `-Network`, or its instruments drop out of the dashboard. You can change Windows' answer later in
+Windows Security ▸ Firewall & network protection ▸ Allow an app through
+firewall.
 
 If Scan misses an instrument you can reach, add it by address, or allow `python`
 in Windows Security ▸ Firewall & network protection ▸ Allow an app through
@@ -319,7 +336,7 @@ anywhere for Guppi Cloud), install just the CLI. One line, no admin rights:
 
 ```
 # macOS or Linux (no sudo)
-curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | bash -s -- cli
+curl -fsSL https://github.com/ezzatisawesome/guppi/releases/latest/download/install.sh | bash -s -- cli
 
 # Windows (PowerShell)
 & ([scriptblock]::Create((irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1))) -Cli

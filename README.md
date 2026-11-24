@@ -14,7 +14,7 @@ or Windows):
 
 ```
 # Linux
-curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
+curl -fsSL https://github.com/ezzatisawesome/guppi/releases/latest/download/install.sh | sudo bash
 
 # Windows (PowerShell)
 irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1 | iex
@@ -37,7 +37,7 @@ To drive a bench from your laptop:
 
 ```
 # macOS or Linux
-curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | bash -s -- cli
+curl -fsSL https://github.com/ezzatisawesome/guppi/releases/latest/download/install.sh | bash -s -- cli
 
 # Windows (PowerShell)
 & ([scriptblock]::Create((irm https://github.com/ezzatisawesome/guppi/releases/latest/download/install.ps1))) -Cli

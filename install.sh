@@ -2,7 +2,7 @@
 # ============================================================================
 # Guppi installer — one script, two components:
 #
-#   curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash
+#   curl -fsSL https://github.com/ezzatisawesome/guppi/releases/latest/download/install.sh | sudo bash
 #     → hub (the default): the bench servers — everything documented below
 #   ... | sudo bash -s -- rack
 #     → rack: device I/O on the machine wired to the instruments. Resolves the
@@ -96,7 +96,7 @@ check_sum() {
 # Re-running it (or `guppi update` on such a machine) upgrades in place.
 if [ "${1:-}" = cli ]; then
   [ "$(id -u)" -ne 0 ] || fail "Run the CLI install WITHOUT sudo — it installs for your user:
-  curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | bash -s -- cli"
+  curl -fsSL https://github.com/ezzatisawesome/guppi/releases/latest/download/install.sh | bash -s -- cli"
   [ ! -d /opt/guppi/src/packages/cli ] || fail "This machine has a Guppi bench, which already has guppi — update it with: guppi update"
   REPO="ezzatisawesome/guppi"
   GUPPI_REF="${GUPPI_REF:-}"
@@ -561,7 +561,7 @@ case "$cmd" in
   *)
     [ -x "$CLI_BIN" ] || echo "guppi: the CLI isn't built ($CLI_BIN is missing)." >&2
     echo "Repair it from YOUR login with plain sudo (not 'sudo -i'):" >&2
-    echo "  curl -fsSL https://raw.githubusercontent.com/ezzatisawesome/guppi/main/install.sh | sudo bash" >&2
+    echo "  curl -fsSL https://github.com/ezzatisawesome/guppi/releases/latest/download/install.sh | sudo bash" >&2
     echo "(rebuilds every venv for $(id -un), keeps ~/.guppi; it does the rack half too)" >&2
     exit 127 ;;
 esac
